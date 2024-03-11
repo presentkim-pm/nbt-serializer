@@ -1,0 +1,9 @@
+---
+branches:
+  - main
+projects:
+  nbt-serializer:
+    path: ""
+    model: virion
+    type: library
+...

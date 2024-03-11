@@ -1,0 +1,22 @@
+{
+  "name": "presentkim/nbt-serializer",
+  "description": "Provides util class for (de)serialize nbt tag more shorter and easier for PocketMine-MP",
+  "type": "library",
+  "license": "MIT",
+  "require": {
+    "pocketmine/pocketmine-mp": "^5.0.0"
+  },
+  "autoload": {
+    "psr-4": {
+      "kim\\present\\serializer\\nbt\\": [
+        "src/kim/present/serializer/nbt"
+      ]
+    }
+  },
+  "extra": {
+    "virion": {
+      "spec": "3.0",
+      "namespace-root": "kim\\present\\serializer\\nbt"
+    }
+  }
+}
