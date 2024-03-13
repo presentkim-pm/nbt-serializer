@@ -28,10 +28,12 @@ namespace kim\present\serializer\nbt;
 
 use pocketmine\nbt\BigEndianNbtSerializer;
 use pocketmine\nbt\JsonNbtParser;
+use pocketmine\nbt\tag\ByteArrayTag;
 use pocketmine\nbt\tag\ByteTag;
 use pocketmine\nbt\tag\CompoundTag;
 use pocketmine\nbt\tag\DoubleTag;
 use pocketmine\nbt\tag\FloatTag;
+use pocketmine\nbt\tag\IntArrayTag;
 use pocketmine\nbt\tag\IntTag;
 use pocketmine\nbt\tag\ListTag;
 use pocketmine\nbt\tag\LongTag;
@@ -48,6 +50,8 @@ use function bin2hex;
 use function get_class;
 use function hex2bin;
 use function implode;
+use function ord;
+use function str_split;
 
 final class NbtSerializer{
 	/**
@@ -89,29 +93,38 @@ final class NbtSerializer{
 	/** Serialize the nbt tag to SNBT (stringified Named Binary Tag) */
 	public static function toSnbt(Tag $tag) : string{
 		return match (get_class($tag)) {
-			ByteTag::class     => $tag->getValue() . "b",
-			ShortTag::class    => $tag->getValue() . "s",
-			IntTag::class      => $tag->getValue() . "",
-			LongTag::class     => $tag->getValue() . "l",
-			FloatTag::class    => $tag->getValue() . "f",
-			DoubleTag::class   => $tag->getValue() . "d",
-			StringTag::class   => '"' . $tag->getValue() . '"',
-			ListTag::class     => "[" . implode(",", array_map(
-					self::toSnbt(...),
-					$tag->getValue()
-				)) . "]",
-			CompoundTag::class => "{" . implode(",", array_map(
+			ByteTag::class      => $tag->getValue() . "b",
+			ShortTag::class     => $tag->getValue() . "s",
+			IntTag::class       => $tag->getValue() . "",
+			LongTag::class      => $tag->getValue() . "l",
+			FloatTag::class     => $tag->getValue() . "f",
+			DoubleTag::class    => $tag->getValue() . "d",
+			StringTag::class    => '"' . $tag->getValue() . '"',
+			CompoundTag::class  => "{" . implode(",", array_map(
 					static fn(string $key, Tag $value) : string => $key . ":" . self::toSnbt($value),
 					array_keys($tag->getValue()),
 					$tag->getValue()
 				)) . "}",
-			// byte-array, int-array, long-array is not supported
-			default            => throw new \InvalidArgumentException("Unknown tag type " . get_class($tag))
+			ListTag::class      => "[" . implode(",", array_map(
+					static fn(Tag $value) : string => self::toSnbt($value),
+					$tag->getValue()
+				)) . "]",
+			ByteArrayTag::class => "[B;" . implode(",", array_map(
+					static fn(string $char) : string => ord($char) . "b",
+					str_split($tag->getValue())
+				)) . "]",
+			IntArrayTag::class  => "[I;" . implode(",", array_map(
+					static fn(int $value) : string => $value . "",
+					$tag->getValue()
+				)) . "]",
+			// long-array is not supported
+			default             => throw new \InvalidArgumentException("Unknown tag type " . get_class($tag))
 		};
 	}
 
 	/** Deserialize the nbt tag from SNBT (stringified Named Binary Tag) */
 	public static function fromSnbt(string $contents) : Tag{
+		// byte-array, int-array, long-array is not supported
 		return JsonNbtParser::parseJson("{contents:$contents}")->getTag("contents");
 	}
 }
