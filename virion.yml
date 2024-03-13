@@ -1,7 +1,7 @@
 ---
 name: nbt-serializer
 antigen: kim\present\serializer\nbt
-version: 1.0.0
+version: 1.1.0
 api: [ 5.0.0 ]
 author: PresentKim
 description: "Provides util class for (de)serialize nbt tag more shorter and easier!"
