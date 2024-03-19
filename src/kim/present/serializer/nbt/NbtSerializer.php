@@ -27,7 +27,6 @@ declare(strict_types=1);
 namespace kim\present\serializer\nbt;
 
 use pocketmine\nbt\BigEndianNbtSerializer;
-use pocketmine\nbt\JsonNbtParser;
 use pocketmine\nbt\tag\ByteArrayTag;
 use pocketmine\nbt\tag\ByteTag;
 use pocketmine\nbt\tag\CompoundTag;
@@ -124,7 +123,6 @@ final class NbtSerializer{
 
 	/** Deserialize the nbt tag from SNBT (stringified Named Binary Tag) */
 	public static function fromSnbt(string $contents) : Tag{
-		// byte-array, int-array, long-array is not supported
-		return JsonNbtParser::parseJson("{contents:$contents}")->getTag("contents");
+		return (new StringifiedNbtParser($contents))->getSnbt();
 	}
 }
