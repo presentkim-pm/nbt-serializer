@@ -51,42 +51,47 @@ use function hex2bin;
 use function implode;
 use function ord;
 use function str_split;
+use function zlib_decode;
+use function zlib_encode;
+
+use const ZLIB_ENCODING_GZIP;
 
 final class NbtSerializer{
 	/**
 	 * Serialize the nbt tag to binary string
 	 * Warning : There is a possibility of data corruption if used without any additional encoding.
 	 */
-	public static function toBinary(Tag $tag) : string{
-		return (new BigEndianNbtSerializer())->write(new TreeRoot($tag));
+	public static function toBinary(Tag $tag, bool $zgip = false) : string{
+		$contents = (new BigEndianNbtSerializer())->write(new TreeRoot($tag));
+		return $zgip ? zlib_encode($contents, ZLIB_ENCODING_GZIP) : $contents;
 	}
 
 	/**
 	 * Deserialize the nbt tag from binary string
 	 * Warning : There is a possibility of data corruption if used without any additional encoding.
 	 */
-	public static function fromBinary(string $contents) : Tag{
-		return (new BigEndianNbtSerializer())->read($contents)->getTag();
+	public static function fromBinary(string $contents, bool $zgip = false) : Tag{
+		return (new BigEndianNbtSerializer())->read($zgip ? zlib_decode($contents) : $contents)->getTag();
 	}
 
 	/** Serialize the nbt tag to base64 string (with binary string) */
-	public static function toBase64(Tag $tag) : string{
-		return base64_encode(self::toBinary($tag));
+	public static function toBase64(Tag $tag, bool $zgip = false) : string{
+		return base64_encode(self::toBinary($tag, $zgip));
 	}
 
 	/** Deserialize the nbt tag from base64 string (with binary string) */
-	public static function fromBase64(string $contents) : Tag{
-		return self::fromBinary(base64_decode($contents, true));
+	public static function fromBase64(string $contents, bool $zgip = false) : Tag{
+		return self::fromBinary(base64_decode($contents, true), $zgip);
 	}
 
 	/** Serialize the nbt tag to hex string (with binary string) */
-	public static function toHex(Tag $tag) : string{
-		return bin2hex(self::toBinary($tag));
+	public static function toHex(Tag $tag, bool $zgip = false) : string{
+		return bin2hex(self::toBinary($tag, $zgip));
 	}
 
 	/** Deserialize the nbt tag from hex string (with binary string) */
-	public static function fromHex(string $contents) : Tag{
-		return self::fromBinary(hex2bin($contents));
+	public static function fromHex(string $contents, bool $zgip = false) : Tag{
+		return self::fromBinary(hex2bin($contents), $zgip);
 	}
 
 	/** Serialize the nbt tag to SNBT (stringified Named Binary Tag) */
