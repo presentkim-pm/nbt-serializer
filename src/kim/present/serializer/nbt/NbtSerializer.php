@@ -51,10 +51,13 @@ use function hex2bin;
 use function implode;
 use function json_encode;
 use function ord;
+use function preg_match;
 use function str_split;
 use function zlib_decode;
 use function zlib_encode;
 
+use const JSON_UNESCAPED_SLASHES;
+use const JSON_UNESCAPED_UNICODE;
 use const ZLIB_ENCODING_GZIP;
 
 final class NbtSerializer{
@@ -107,7 +110,11 @@ final class NbtSerializer{
             DoubleTag::class    => $tag->getValue() . "d",
             StringTag::class    => json_encode($tag->getValue(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             CompoundTag::class  => "{" . implode(",", array_map(
-                    static fn(string $key, Tag $value) : string => $key . ":" . self::toSnbt($value),
+                    static fn(string $key, Tag $value) : string => (
+                        preg_match("/^[a-z0-9._+-]+$/i", $key) ?
+                            $key
+                            : json_encode($key, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                        ) . ":" . self::toSnbt($value),
                     array_keys($tag->getValue()),
                     $tag->getValue()
                 )) . "}",
