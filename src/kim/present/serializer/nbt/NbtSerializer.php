@@ -49,6 +49,7 @@ use function bin2hex;
 use function get_class;
 use function hex2bin;
 use function implode;
+use function json_encode;
 use function ord;
 use function str_split;
 use function zlib_decode;
@@ -104,7 +105,7 @@ final class NbtSerializer{
             LongTag::class      => $tag->getValue() . "l",
             FloatTag::class     => $tag->getValue() . "f",
             DoubleTag::class    => $tag->getValue() . "d",
-            StringTag::class    => '"' . $tag->getValue() . '"',
+            StringTag::class    => json_encode($tag->getValue(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             CompoundTag::class  => "{" . implode(",", array_map(
                     static fn(string $key, Tag $value) : string => $key . ":" . self::toSnbt($value),
                     array_keys($tag->getValue()),
