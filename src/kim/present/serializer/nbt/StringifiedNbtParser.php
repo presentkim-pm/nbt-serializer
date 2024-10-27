@@ -88,7 +88,7 @@ final class StringifiedNbtParser extends BinaryStream{
                     $retval = new StringTag($value);
                     $foundEnd = true;
                 }elseif($c === "\\"){
-                    $value .= $this->get(1);
+                    $value .= stripcslashes($c . $this->get(1));
                 }else{
                     $value .= $c;
                 }
