@@ -50,12 +50,8 @@ use function get_class;
 use function hex2bin;
 use function implode;
 use function json_encode;
-use function ord;
 use function preg_match;
 use function str_split;
-
-use const JSON_UNESCAPED_SLASHES;
-use const JSON_UNESCAPED_UNICODE;
 
 final class NbtSerializer{
 
@@ -98,35 +94,31 @@ final class NbtSerializer{
     /** Serialize the nbt tag to SNBT (stringified Named Binary Tag) */
     public static function toSnbt(Tag $tag) : string{
         return match (get_class($tag)) {
-            ByteTag::class      => $tag->getValue() . "b",
-            ShortTag::class     => $tag->getValue() . "s",
-            IntTag::class       => $tag->getValue() . "",
-            LongTag::class      => $tag->getValue() . "l",
-            FloatTag::class     => $tag->getValue() . "f",
-            DoubleTag::class    => $tag->getValue() . "d",
-            StringTag::class    => json_encode($tag->getValue(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-            CompoundTag::class  => "{" . implode(",", array_map(
-                    static fn(string $key, Tag $value) : string => (
-                        preg_match("/^[a-z0-9._+-]+$/i", $key) ?
-                            $key
-                            : json_encode($key, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
-                        ) . ":" . self::toSnbt($value),
-                    array_keys($tag->getValue()),
-                    $tag->getValue()
+            ByteTag::class      => "{$tag->getValue()}b",
+            ShortTag::class     => "{$tag->getValue()}s",
+            IntTag::class       => "{$tag->getValue()}",
+            LongTag::class      => "{$tag->getValue()}l",
+            FloatTag::class     => "{$tag->getValue()}f",
+            DoubleTag::class    => "{$tag->getValue()}d",
+            StringTag::class    => json_encode($tag->getValue()),
+            CompoundTag::class  => empty($value = $tag->getValue())
+                ? "{}"
+                : "{" . implode(",", array_map(
+                    fn($key) => (preg_match("/[^a-zA-Z0-9._+-]/", "$key")
+                            ? json_encode($key)
+                            : $key
+                        ) . ":" . self::toSnbt($value[$key]),
+                    array_keys($value)
                 )) . "}",
-            ListTag::class      => "[" . implode(",", array_map(
-                    static fn(Tag $value) : string => self::toSnbt($value),
-                    $tag->getValue()
-                )) . "]",
-            ByteArrayTag::class => "[B;" . implode(",", array_map(
-                    static fn(string $char) : string => ord($char) . "b",
-                    str_split($tag->getValue())
-                )) . "]",
-            IntArrayTag::class  => "[I;" . implode(",", array_map(
-                    static fn(int $value) : string => $value . "",
-                    $tag->getValue()
-                )) . "]",
-            // long-array is not supported
+            ListTag::class      => empty($value = $tag->getValue())
+                ? "[]"
+                : "[" . implode(",", array_map(self::toSnbt(...), $value)) . "]",
+            ByteArrayTag::class => empty($value = $tag->getValue())
+                ? "[B;]"
+                : "[B;" . implode("b,", array_map(ord(...), str_split($value))) . "b]",
+            IntArrayTag::class  => empty($value = $tag->getValue())
+                ? "[I;]"
+                : "[I;" . implode(",", $value) . "]",
             default             => throw new \InvalidArgumentException("Unknown tag type " . get_class($tag))
         };
     }
