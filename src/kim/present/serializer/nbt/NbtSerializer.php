@@ -50,15 +50,9 @@ use function get_class;
 use function hex2bin;
 use function implode;
 use function json_encode;
-use function ord;
 use function preg_match;
+use function str_repeat;
 use function str_split;
-use function zlib_decode;
-use function zlib_encode;
-
-use const JSON_UNESCAPED_SLASHES;
-use const JSON_UNESCAPED_UNICODE;
-use const ZLIB_ENCODING_GZIP;
 
 final class NbtSerializer{
 
@@ -66,77 +60,107 @@ final class NbtSerializer{
      * Serialize the nbt tag to binary string
      * Warning : There is a possibility of data corruption if used without any additional encoding.
      */
-    public static function toBinary(Tag $tag, bool $zgip = false) : string{
-        $contents = (new BigEndianNbtSerializer())->write(new TreeRoot($tag));
-        return $zgip ? zlib_encode($contents, ZLIB_ENCODING_GZIP) : $contents;
+    public static function toBinary(Tag $tag) : string{
+        return (new BigEndianNbtSerializer())->write(new TreeRoot($tag));
     }
 
     /**
      * Deserialize the nbt tag from binary string
      * Warning : There is a possibility of data corruption if used without any additional encoding.
      */
-    public static function fromBinary(string $contents, bool $zgip = false) : Tag{
-        return (new BigEndianNbtSerializer())->read($zgip ? zlib_decode($contents) : $contents)->getTag();
+    public static function fromBinary(string $contents) : Tag{
+        return (new BigEndianNbtSerializer())->read($contents)->getTag();
     }
 
     /** Serialize the nbt tag to base64 string (with binary string) */
-    public static function toBase64(Tag $tag, bool $zgip = false) : string{
-        return base64_encode(self::toBinary($tag, $zgip));
+    public static function toBase64(Tag $tag) : string{
+        return base64_encode(self::toBinary($tag));
     }
 
     /** Deserialize the nbt tag from base64 string (with binary string) */
-    public static function fromBase64(string $contents, bool $zgip = false) : Tag{
-        return self::fromBinary(base64_decode($contents, true), $zgip);
+    public static function fromBase64(string $contents) : Tag{
+        return self::fromBinary(base64_decode($contents, true));
     }
 
     /** Serialize the nbt tag to hex string (with binary string) */
-    public static function toHex(Tag $tag, bool $zgip = false) : string{
-        return bin2hex(self::toBinary($tag, $zgip));
+    public static function toHex(Tag $tag) : string{
+        return bin2hex(self::toBinary($tag));
     }
 
     /** Deserialize the nbt tag from hex string (with binary string) */
-    public static function fromHex(string $contents, bool $zgip = false) : Tag{
-        return self::fromBinary(hex2bin($contents), $zgip);
+    public static function fromHex(string $contents) : Tag{
+        return self::fromBinary(hex2bin($contents));
     }
 
     /** Serialize the nbt tag to SNBT (stringified Named Binary Tag) */
     public static function toSnbt(Tag $tag) : string{
         return match (get_class($tag)) {
-            ByteTag::class      => $tag->getValue() . "b",
-            ShortTag::class     => $tag->getValue() . "s",
-            IntTag::class       => $tag->getValue() . "",
-            LongTag::class      => $tag->getValue() . "l",
-            FloatTag::class     => $tag->getValue() . "f",
-            DoubleTag::class    => $tag->getValue() . "d",
-            StringTag::class    => json_encode($tag->getValue(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-            CompoundTag::class  => "{" . implode(",", array_map(
-                    static fn(string $key, Tag $value) : string => (
-                        preg_match("/^[a-z0-9._+-]+$/i", $key) ?
-                            $key
-                            : json_encode($key, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
-                        ) . ":" . self::toSnbt($value),
-                    array_keys($tag->getValue()),
-                    $tag->getValue()
+            ByteTag::class      => "{$tag->getValue()}b",
+            ShortTag::class     => "{$tag->getValue()}s",
+            IntTag::class       => "{$tag->getValue()}",
+            LongTag::class      => "{$tag->getValue()}l",
+            FloatTag::class     => "{$tag->getValue()}f",
+            DoubleTag::class    => "{$tag->getValue()}d",
+            StringTag::class    => json_encode($tag->getValue()),
+            CompoundTag::class  => empty($value = $tag->getValue())
+                ? "{}"
+                : "{" . implode(",", array_map(
+                    fn($key) => (preg_match("/[^a-zA-Z0-9._+-]/", "$key")
+                            ? json_encode($key)
+                            : $key
+                        ) . ":" . self::toSnbt($value[$key]),
+                    array_keys($value)
                 )) . "}",
-            ListTag::class      => "[" . implode(",", array_map(
-                    static fn(Tag $value) : string => self::toSnbt($value),
-                    $tag->getValue()
-                )) . "]",
-            ByteArrayTag::class => "[B;" . implode(",", array_map(
-                    static fn(string $char) : string => ord($char) . "b",
-                    str_split($tag->getValue())
-                )) . "]",
-            IntArrayTag::class  => "[I;" . implode(",", array_map(
-                    static fn(int $value) : string => $value . "",
-                    $tag->getValue()
-                )) . "]",
-            // long-array is not supported
+            ListTag::class      => empty($value = $tag->getValue())
+                ? "[]"
+                : "[" . implode(",", array_map(self::toSnbt(...), $value)) . "]",
+            ByteArrayTag::class => empty($value = $tag->getValue())
+                ? "[B;]"
+                : "[B;" . implode("b,", array_map(ord(...), str_split($value))) . "b]",
+            IntArrayTag::class  => empty($value = $tag->getValue())
+                ? "[I;]"
+                : "[I;" . implode(",", $value) . "]",
             default             => throw new \InvalidArgumentException("Unknown tag type " . get_class($tag))
+        };
+    }
+
+    /**
+     * Serialize the nbt tag to SNBT with spacing and indenting
+     * Warning: The deeper the indenting, the more degraded the deserialize performance.
+     */
+    public static function toSnbtPretty(
+        Tag $tag,
+        int $indentLevel = 0,
+        string $indentChar = "    ",
+        string $lineBreak = "\n"
+    ) : string{
+        $tap = str_repeat($indentChar, $indentLevel);
+        $innerTap = "$lineBreak$tap$indentChar";
+        return match (get_class($tag)) {
+            CompoundTag::class => empty($value = $tag->getValue())
+                ? "{}"
+                : "{{$innerTap}" . implode(
+                    ", $innerTap",
+                    array_map(fn($key) => (preg_match("/[^a-zA-Z0-9._+-]/", "$key")
+                            ? json_encode($key)
+                            : $key
+                        ) . ": " . self::toSnbtPretty($value[$key], $indentLevel + 1, $indentChar, $lineBreak),
+                        array_keys($value)
+                    )
+                ) . "$lineBreak$tap}",
+            ListTag::class     => empty($value = $tag->getValue())
+                ? "[]"
+                : "[$innerTap" . implode(
+                    ", $innerTap",
+                    array_map(fn($v) => self::toSnbtPretty($v, $indentLevel + 1, $indentChar, $lineBreak), $value)
+                ) . "$lineBreak$tap]",
+            default            => self::toSnbt($tag)
         };
     }
 
     /** Deserialize the nbt tag from SNBT (stringified Named Binary Tag) */
     public static function fromSnbt(string $contents) : Tag{
-        return (new StringifiedNbtParser($contents))->getSnbt();
+        return (new StringifiedNbtParser($contents))->readTag();
     }
+
 }

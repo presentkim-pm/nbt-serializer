@@ -26,10 +26,9 @@ declare(strict_types=1);
 
 namespace kim\present\serializer\nbt;
 
-use pocketmine\nbt\InvalidTagValueException;
-use pocketmine\nbt\JsonNbtParser;
-use pocketmine\nbt\NBT;
-use pocketmine\nbt\NbtDataException;
+use kim\present\serializer\nbt\exception\SnbtDataException;
+use kim\present\serializer\nbt\exception\SnbtSyntaxException;
+use kim\present\serializer\nbt\exception\SnbtUnexpectedEndException;
 use pocketmine\nbt\tag\ByteArrayTag;
 use pocketmine\nbt\tag\ByteTag;
 use pocketmine\nbt\tag\CompoundTag;
@@ -42,336 +41,211 @@ use pocketmine\nbt\tag\LongTag;
 use pocketmine\nbt\tag\ShortTag;
 use pocketmine\nbt\tag\StringTag;
 use pocketmine\nbt\tag\Tag;
-use pocketmine\utils\BinaryDataException;
-use pocketmine\utils\BinaryStream;
 
+use function addcslashes;
 use function chr;
-use function get_class;
 use function is_numeric;
-use function str_contains;
-use function strlen;
+use function json_decode;
+use function preg_match;
+use function preg_match_all;
+use function strpos;
 use function strtolower;
 use function strtoupper;
 use function substr;
 use function trim;
 
-/** Base source from {@link JsonNbtParser} */
-final class StringifiedNbtParser extends BinaryStream{
+final class StringifiedNbtParser{
 
-    public function __construct(string $buffer = "", int $offset = 0){
-        parent::__construct(trim($buffer, " \r\n\t"), $offset);
+    private string $buffer;
+    private int $offset = 0;
+
+    public function __construct(string $buffer){
+        $this->buffer = trim($buffer);
     }
 
-    /**
-     * @throws BinaryDataException
-     * @throws NbtDataException
-     * @throws InvalidTagValueException
-     */
-    public function getSnbt() : Tag{
+    public function readTag() : Tag{
         $value = "";
-        $inQuotes = false;
 
-        $offset = $this->getOffset();
-
-        $foundEnd = false;
-
-        /** @var Tag|null $retval */
-        $retval = null;
-
-        while(!$this->feof()){
-            $offset = $this->getOffset();
-            $c = $this->get(1);
-
-            if($inQuotes){ //anything is allowed inside quotes, except unescaped quotes
-                if($c === '"'){
-                    $inQuotes = false;
-                    $retval = new StringTag($value);
-                    $foundEnd = true;
-                }elseif($c === "\\"){
-                    $value .= stripcslashes($c . $this->get(1));
-                }else{
-                    $value .= $c;
-                }
-            }else{
-                if($c === "," or $c === "}" or $c === "]"){ //end of parent tag
-                    $this->setOffset($this->getOffset() - 1); //the caller needs to be able to read this character
-                    break;
-                }
-
-                if($value === "" or $foundEnd){
-                    if($c === "\r" or $c === "\n" or $c === "\t" or $c
-                        === " "){ //leading or trailing whitespace, ignore it
-                        continue;
-                    }
-
-                    if($foundEnd){ //unexpected non-whitespace character after end of value
-                        throw new NbtDataException("Syntax error: unexpected '$c' after end of value at offset $offset");
-                    }
-                }
-
-                if($c === '"'){ //start of quoted string
-                    if($value !== ""){
-                        throw new NbtDataException("Syntax error: unexpected quote at offset $offset");
-                    }
-                    $inQuotes = true;
-                }elseif($c === "{"){ //start of compound tag
-                    if($value !== ""){
-                        throw new NbtDataException("Syntax error: unexpected compound start at offset $offset (enclose in double quotes for literal)");
-                    }
-
-                    $retval = $this->getSnbtCompound();
-                    $foundEnd = true;
-                }elseif($c === "["){
-                    if($value !== ""){
-                        throw new NbtDataException("Syntax error: unexpected list start at offset $offset (enclose in double quotes for literal)");
-                    }
-
-                    $retval = $this->getSnbtListOrArray();
-                    $foundEnd = true;
-                }else{ //any other character
-                    $value .= $c;
-                }
+        while(isset($this->buffer[$this->offset])){
+            $c = $this->buffer[$this->offset++];
+            if($c === "," || $c === "}" || $c === "]"){ // end of parent tag
+                $this->offset--;
+                break;
             }
+
+            if($c === '"'){ // start of quoted string
+                return new StringTag($this->readEscapedString());
+            }
+
+            if($c === "{"){ // start of compound tag
+                return $this->readCompoundTag();
+            }
+
+            if($c === "["){ // start of collection
+                if(isset($this->buffer[$this->offset + 2])){
+                    $listHead = strtoupper(substr($this->buffer, $this->offset, 2));
+                    if($listHead === "B;"){
+                        $this->offset += 2;
+                        return $this->getByteArrayTag();
+                    }elseif($listHead === "I;"){
+                        $this->offset += 2;
+                        return $this->getIntArrayTag();
+                    }
+                }
+                return $this->getListTag();
+            }
+
+            //any other character
+            $value .= $c;
         }
 
-        if($retval !== null){
-            return $retval;
-        }
-
+        $value = trim($value);
         if($value === ""){
-            throw new NbtDataException("Syntax error: empty value at offset $offset");
+            throw new SnbtDataException(
+                "empty value in '" . addcslashes($value, "\r\n ") . "'",
+                $this->offset
+            );
         }
 
-        $last = strtolower(substr($value, -1));
-        $part = substr($value, 0, -1);
-
-        if($last !== "b" and $last !== "s" and $last !== "l" and $last !== "f" and $last !== "d"){
-            $part = $value;
+        $last = strtolower($value[-1]);
+        if($last === "b" || $last === "s" || $last === "l" || $last === "f" || $last === "d"){
+            $value = substr($value, 0, -1);
+        }else{
             $last = null;
         }
 
-        if(is_numeric($part)){
-            if(
-                $last === "f" or $last === "d" or
-                str_contains($part, ".") or str_contains($part, "e")
-            ){ //e = scientific notation
-                $value = (float) $part;
-                return match ($last) {
-                    "d"     => new DoubleTag($value),
-                    default => new FloatTag($value),
-                };
-            }
-
-            $value = (int) $part;
+        if(is_numeric($value)){
             return match ($last) {
-                "b"     => new ByteTag($value),
-                "s"     => new ShortTag($value),
-                "l"     => new LongTag($value),
-                default => new IntTag($value),
+                "b"     => new ByteTag((int) $value),
+                "s"     => new ShortTag((int) $value),
+                "l"     => new LongTag((int) $value),
+                "f"     => new FloatTag((float) $value),
+                "d"     => new DoubleTag((float) $value),
+                default => new IntTag((int) $value),
             };
         }
 
-        return new StringTag($value);
+        return new StringTag($value . $last);
     }
 
-    /**
-     * @throws BinaryDataException
-     * @throws NbtDataException
-     */
-    private function getSnbtListOrArray() : ListTag|ByteArrayTag|IntArrayTag{
-        if(!$this->skipWhitespace("]")){
-            return new ListTag();
-        }
-        // Detect result tag type
-        $retval = new ListTag();
-        if(strlen($this->buffer) >= ($this->offset + 2)){
-            $offset = $this->offset;
-            $head = strtoupper($this->get(2));
-            if($head === "B;"){
-                $retval = new ByteArrayTag("");
-            }elseif($head === "I;"){
-                $retval = new IntArrayTag([]);
-            }else{
-                $this->offset = $offset;
-            }
-        }
-
-        $tags = [];
-        while(!$this->feof()){
-            try{
-                $tag = $this->getSnbt();
-            }catch(InvalidTagValueException $e){
-                throw new NbtDataException("Data error: " . $e->getMessage());
-            }
-            $tags[] = $tag;
-            if($this->readBreak("]")){
-                break;
-            }
-        }
-
-        if($retval instanceof ListTag){
-            foreach($tags as $tag){
-                $expectedType = $retval->getTagType();
-                if($expectedType !== NBT::TAG_End && $expectedType !== $tag->getType()){
-                    throw new NbtDataException("Data error: lists can only contain one type of value");
-                }
-                $retval->push($tag);
-            }
-        }elseif($retval instanceof ByteArrayTag){
-            $value = "";
-            foreach($tags as $tag){
-                if(!$tag instanceof ByteTag){
-                    throw new NbtDataException("Data error: expected byte value, got " . get_class($tag));
-                }
-                $value .= chr($tag->getValue());
-            }
-            $retval = new ByteArrayTag($value);
-        }elseif($retval instanceof IntArrayTag){
-            $value = [];
-            foreach($tags as $tag){
-                if(!$tag instanceof IntTag){
-                    throw new NbtDataException("Data error: expected int value, got " . get_class($tag));
-                }
-                $value[] = $tag->getValue();
-            }
-            $retval = new IntArrayTag($value);
-        }else{
-            throw new NbtDataException("Data error: unknown list type");
-        }
-        return $retval;
-    }
-
-    /**
-     * @throws BinaryDataException
-     * @throws NbtDataException
-     */
-    private function getSnbtCompound() : CompoundTag{
-        $retval = new CompoundTag();
-
-        if($this->skipWhitespace("}")){
-            while(!$this->feof()){
-                $k = $this->readKey();
-                if($retval->getTag($k) !== null){
-                    throw new NbtDataException("Syntax error: duplicate compound leaf node '$k'");
-                }
-                try{
-                    $retval->setTag($k, $this->getSnbt());
-                }catch(InvalidTagValueException $e){
-                    throw new NbtDataException("Data error: " . $e->getMessage());
-                }
-
-                if($this->readBreak("}")){
-                    return $retval;
-                }
-            }
-
-            throw new NbtDataException("Syntax error: unexpected end of stream");
-        }
-
-        return $retval;
-    }
-
-    /**
-     * @throws BinaryDataException
-     * @throws NbtDataException
-     */
-    private function skipWhitespace(string $terminator) : bool{
-        while(!$this->feof()){
-            $b = $this->get(1);
-            if($b === $terminator){
-                return false;
-            }
-            if($b === " " or $b === "\n" or $b === "\t" or $b === "\r"){
+    private function getListTag() : ListTag{
+        $result = new ListTag();
+        while(isset($this->buffer[$this->offset])){
+            $c = $this->buffer[$this->offset++];
+            if($c === "," || $c <= " "){
                 continue;
             }
 
-            $this->setOffset($this->getOffset() - 1);
-            return true;
-        }
+            if($c === "]"){
+                return $result;
+            }
 
-        throw new NbtDataException("Syntax error: unexpected end of stream, expected start of key");
+            $this->offset--;
+            $result->push($this->readTag());
+        }
+        throw new SnbtUnexpectedEndException("']'");
     }
 
-    /**
-     * @return bool true if terminator has been found, false if comma was found
-     * @throws BinaryDataException
-     * @throws NbtDataException
-     */
-    private function readBreak(string $terminator) : bool{
-        if($this->feof()){
-            throw new NbtDataException("Syntax error: unexpected end of stream, expected '$terminator'");
-        }
-        $offset = $this->getOffset();
-        $c = $this->get(1);
-        if($c === ","){
-            return false;
-        }
-        if($c === $terminator){
-            return true;
+    private function getByteArrayTag() : ByteArrayTag{
+        $closePos = strpos($this->buffer, "]", $this->offset);
+        if($closePos === false){
+            throw new SnbtUnexpectedEndException("']'");
         }
 
-        throw new NbtDataException("Syntax error: unexpected '$c' end at offset $offset");
+        $offset = $this->offset;
+        $this->offset = $closePos + 1;
+        if($offset === $closePos){
+            return new ByteArrayTag("");
+        }
+
+        $value = substr($this->buffer, $offset, $closePos - $offset);
+        if(!preg_match("/^(\s*-?\d{0,3}b\s*(,|$)\s*)*$/", $value)){
+            throw new SnbtSyntaxException("unexpected char", $offset, "byte entries");
+        }
+
+        preg_match_all("/(-?\d+)b/", $value, $matches);
+        $result = "";
+        foreach($matches[1] as $ord){
+            $result .= chr((int) $ord);
+        }
+        return new ByteArrayTag($result);
     }
 
-    /**
-     * @throws BinaryDataException
-     * @throws NbtDataException
-     */
-    private function readKey() : string{
-        $key = "";
-        $offset = $this->getOffset();
+    private function getIntArrayTag() : IntArrayTag{
+        $closePos = strpos($this->buffer, "]", $this->offset);
+        if($closePos === false){
+            throw new SnbtUnexpectedEndException("']'");
+        }
 
-        $inQuotes = false;
-        $foundEnd = false;
+        $offset = $this->offset;
+        $this->offset = $closePos + 1;
+        if($offset === $closePos){
+            return new IntArrayTag([]);
+        }
 
-        while(!$this->feof()){
-            $c = $this->get(1);
+        $value = substr($this->buffer, $offset, $closePos - $offset);
+        if(!preg_match("/^(\s*-?\d+\s*(,|$)\s*)*$/", $value)){
+            throw new SnbtSyntaxException("unexpected char", $offset, "integer entries");
+        }
 
-            if($inQuotes){
-                if($c === '"'){
-                    $inQuotes = false;
-                    $foundEnd = true;
-                }elseif($c === "\\"){
-                    $key .= $this->get(1);
-                }else{
-                    $key .= $c;
+        preg_match_all("/(-?\d+)/", $value, $matches);
+        $result = [];
+        foreach($matches[1] as $ord){
+            $result[] = (int) $ord;
+        }
+        $this->offset = $closePos + 1;
+        return new IntArrayTag($result);
+    }
+
+    private function readCompoundTag() : CompoundTag{
+        $tag = CompoundTag::create();
+        while(isset($this->buffer[$this->offset])){
+            $c = $this->buffer[$this->offset++];
+            if($c === "," || $c <= " "){
+                continue;
+            }
+
+            if($c === "}"){
+                return $tag;
+            }
+
+            if($c === ':'){
+                $key = "";
+            }elseif($c === '"'){
+                $key = $this->readEscapedString();
+
+                $c = $this->buffer[$this->offset++];
+                if($c !== ":"){
+                    throw new SnbtSyntaxException("unexpected '$c'", $this->offset - 1, "':'");
                 }
             }else{
-                if($c === ":"){
-                    $foundEnd = true;
-                    break;
+                $closePos = strpos($this->buffer, ":", $this->offset);
+                if($closePos === false){
+                    throw new SnbtUnexpectedEndException("':'");
                 }
+                $key = trim($c . substr($this->buffer, $this->offset, $closePos - $this->offset));
+                $this->offset = $closePos + 1;
+            }
+            $tag->setTag($key, $this->readTag());
+        }
 
-                if($key === "" or $foundEnd){
-                    if($c === "\r" or $c === "\n" or $c === "\t" or $c === " "){
-                        continue;
-                    }
+        throw new SnbtUnexpectedEndException("'}'");
+    }
 
-                    if($foundEnd){ //unexpected non-whitespace character after end of value
-                        throw new NbtDataException("Syntax error: unexpected '$c' after end of value at offset $offset");
-                    }
-                }
+    private function readEscapedString() : string{
+        $substrOffset = $this->offset;
+        while(true){
+            $closePos = strpos($this->buffer, '"', $this->offset);
+            $this->offset = $closePos + 1;
 
-                if($c === '"'){ //start of quoted string
-                    if($key !== ""){
-                        throw new NbtDataException("Syntax error: unexpected quote at offset $offset");
-                    }
-                    $inQuotes = true;
-                }elseif($c === "{" or $c === "}" or $c === "[" or $c === "]" or $c === ","){
-                    throw new NbtDataException("Syntax error: unexpected '$c' at offset $offset (enclose in double quotes for literal)");
-                }else{ //any other character
-                    $key .= $c;
-                }
+            if($closePos === false){
+                throw new SnbtUnexpectedEndException("'\"'");
+            }elseif($this->buffer[$closePos - 1] === "\\"){
+                continue;
+            }else{
+                return json_decode('"' . substr($this->buffer, $substrOffset, $closePos - $substrOffset) . '"');
             }
         }
-
-        if($key === ""){
-            throw new NbtDataException("Syntax error: invalid empty key at offset $offset");
-        }
-        if(!$foundEnd){
-            throw new NbtDataException("Syntax error: unexpected end of stream at offset $offset");
-        }
-
-        return $key;
     }
+
 }
