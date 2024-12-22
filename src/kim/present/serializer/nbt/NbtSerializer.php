@@ -51,6 +51,7 @@ use function hex2bin;
 use function implode;
 use function json_encode;
 use function preg_match;
+use function str_repeat;
 use function str_split;
 
 final class NbtSerializer{
@@ -120,6 +121,40 @@ final class NbtSerializer{
                 ? "[I;]"
                 : "[I;" . implode(",", $value) . "]",
             default             => throw new \InvalidArgumentException("Unknown tag type " . get_class($tag))
+        };
+    }
+
+    /**
+     * Serialize the nbt tag to SNBT with spacing and indenting
+     * Warning: The deeper the indenting, the more degraded the deserialize performance.
+     */
+    public static function toSnbtPretty(
+        Tag $tag,
+        int $indentLevel = 0,
+        string $indentChar = "    ",
+        string $lineBreak = "\n"
+    ) : string{
+        $tap = str_repeat($indentChar, $indentLevel);
+        $innerTap = "$lineBreak$tap$indentChar";
+        return match (get_class($tag)) {
+            CompoundTag::class => empty($value = $tag->getValue())
+                ? "{}"
+                : "{{$innerTap}" . implode(
+                    ", $innerTap",
+                    array_map(fn($key) => (preg_match("/[^a-zA-Z0-9._+-]/", "$key")
+                            ? json_encode($key)
+                            : $key
+                        ) . ": " . self::toSnbtPretty($value[$key], $indentLevel + 1, $indentChar, $lineBreak),
+                        array_keys($value)
+                    )
+                ) . "$lineBreak$tap}",
+            ListTag::class     => empty($value = $tag->getValue())
+                ? "[]"
+                : "[$innerTap" . implode(
+                    ", $innerTap",
+                    array_map(fn($v) => self::toSnbtPretty($v, $indentLevel + 1, $indentChar, $lineBreak), $value)
+                ) . "$lineBreak$tap]",
+            default            => self::toSnbt($tag)
         };
     }
 
