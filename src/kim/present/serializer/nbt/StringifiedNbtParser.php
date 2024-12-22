@@ -85,10 +85,10 @@ final class StringifiedNbtParser extends BinaryStream{
             if($inQuotes){ //anything is allowed inside quotes, except unescaped quotes
                 if($c === '"'){
                     $inQuotes = false;
-                    $retval = new StringTag($value);
+                    $retval = new StringTag(json_decode('"' . $value . '"'));
                     $foundEnd = true;
                 }elseif($c === "\\"){
-                    $value .= stripcslashes($c . $this->get(1));
+                    $value .= $c . $this->get(1);
                 }else{
                     $value .= $c;
                 }
