@@ -73,8 +73,8 @@ final class StringifiedNbtParser{
                 break;
             }
 
-            if($c === '"'){ // start of quoted string
-                return new StringTag($this->readEscapedString());
+            if($c === '"' || $c === "'"){ // start of quoted string
+                return new StringTag($this->readEscapedString($c));
             }
 
             if($c === "{"){ // start of compound tag
@@ -211,8 +211,8 @@ final class StringifiedNbtParser{
 
             if($c === ':'){
                 $key = "";
-            }elseif($c === '"'){
-                $key = $this->readEscapedString();
+            }elseif($c === '"' || $c === "'"){
+                $key = $this->readEscapedString($c);
 
                 $c = $this->buffer[$this->offset++];
                 if($c !== ":"){
@@ -232,14 +232,14 @@ final class StringifiedNbtParser{
         throw new SnbtUnexpectedEndException("'}'");
     }
 
-    private function readEscapedString() : string{
+    private function readEscapedString(string $quote) : string{
         $substrOffset = $this->offset;
         while(true){
-            $closePos = strpos($this->buffer, '"', $this->offset);
+            $closePos = strpos($this->buffer, $quote, $this->offset);
             $this->offset = $closePos + 1;
 
             if($closePos === false){
-                throw new SnbtUnexpectedEndException("'\"'");
+                throw new SnbtUnexpectedEndException("'$quote'");
             }elseif($this->buffer[$closePos - 1] === "\\"){
                 continue;
             }else{
