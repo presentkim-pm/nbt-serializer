@@ -196,6 +196,10 @@ final class StringifiedNbtParser extends BinaryStream{
             }
         }
 
+        if(!$this->skipWhitespace("]")){
+            return $retval;
+        }
+
         $tags = [];
         while(!$this->feof()){
             try{
