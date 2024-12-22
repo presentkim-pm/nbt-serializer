@@ -125,6 +125,7 @@ final class NbtSerializer{
 
     /** Deserialize the nbt tag from SNBT (stringified Named Binary Tag) */
     public static function fromSnbt(string $contents) : Tag{
-        return (new StringifiedNbtParser($contents))->getSnbt();
+        return (new StringifiedNbtParser($contents))->readTag();
     }
+
 }
