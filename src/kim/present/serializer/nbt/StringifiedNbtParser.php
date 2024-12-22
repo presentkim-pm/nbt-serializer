@@ -369,13 +369,11 @@ final class StringifiedNbtParser extends BinaryStream{
             }
         }
 
-        if($key === ""){
-            throw new NbtDataException("Syntax error: invalid empty key at offset $offset");
-        }
         if(!$foundEnd){
             throw new NbtDataException("Syntax error: unexpected end of stream at offset $offset");
         }
 
         return $key;
     }
+
 }
