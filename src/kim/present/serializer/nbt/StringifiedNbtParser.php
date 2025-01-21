@@ -48,6 +48,7 @@ use function is_numeric;
 use function json_decode;
 use function preg_match;
 use function preg_match_all;
+use function str_contains;
 use function strpos;
 use function strtolower;
 use function strtoupper;
@@ -121,7 +122,7 @@ final class StringifiedNbtParser{
                 "l"     => new LongTag((int) $value),
                 "f"     => new FloatTag((float) $value),
                 "d"     => new DoubleTag((float) $value),
-                default => new IntTag((int) $value),
+                default => str_contains($value, ".") ? new DoubleTag((float) $value) : new IntTag((int) $value)
             };
         }
 
