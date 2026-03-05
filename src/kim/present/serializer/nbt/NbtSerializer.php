@@ -109,25 +109,40 @@ final class NbtSerializer{
             LongTag::class      => "{$tag->getValue()}l",
             FloatTag::class     => "{$tag->getValue()}f",
             DoubleTag::class    => "{$tag->getValue()}d",
-            StringTag::class    => json_encode($tag->getValue()),
-            CompoundTag::class  => empty($value = $tag->getValue())
-                ? "{}"
-                : "{" . implode(",", array_map(
-                    fn($key) => (preg_match("/[^a-zA-Z0-9._+-]/", "$key")
-                            ? json_encode($key)
-                            : $key
-                        ) . ":" . self::toSnbt($value[$key]),
-                    array_keys($value)
-                )) . "}",
-            ListTag::class      => empty($value = $tag->getValue())
-                ? "[]"
-                : "[" . implode(",", array_map(self::toSnbt(...), $value)) . "]",
-            ByteArrayTag::class => empty($value = $tag->getValue())
-                ? "[B;]"
-                : "[B;" . implode("b,", array_map(ord(...), str_split($value))) . "b]",
-            IntArrayTag::class  => empty($value = $tag->getValue())
-                ? "[I;]"
-                : "[I;" . implode(",", $value) . "]",
+            StringTag::class    => (function() use ($tag){
+                $j = json_encode($tag->getValue());
+                return $j !== false ? $j : '""';
+            })(),
+            CompoundTag::class  => (function() use ($tag){
+                $value = $tag->getValue();
+                return $value === []
+                    ? "{}"
+                    : "{" . implode(",", array_map(
+                        fn($key) => (preg_match("/[^a-zA-Z0-9._+-]/", "$key") === 1
+                                ? json_encode($key)
+                                : $key
+                            ) . ":" . self::toSnbt($value[$key]),
+                        array_keys($value)
+                    )) . "}";
+            })(),
+            ListTag::class      => (function() use ($tag){
+                $value = $tag->getValue();
+                return $value === []
+                    ? "[]"
+                    : "[" . implode(",", array_map(self::toSnbt(...), $value)) . "]";
+            })(),
+            ByteArrayTag::class => (function() use ($tag){
+                $value = $tag->getValue();
+                return $value === ''
+                    ? "[B;]"
+                    : "[B;" . implode("b,", array_map(ord(...), str_split($value))) . "b]";
+            })(),
+            IntArrayTag::class  => (function() use ($tag){
+                $value = $tag->getValue();
+                return $value === []
+                    ? "[I;]"
+                    : "[I;" . implode(",", $value) . "]";
+            })(),
             default             => throw new \InvalidArgumentException("Unknown tag type " . get_class($tag))
         };
     }
@@ -145,23 +160,29 @@ final class NbtSerializer{
         $tap = str_repeat($indentChar, $indentLevel);
         $innerTap = "$lineBreak$tap$indentChar";
         return match (get_class($tag)) {
-            CompoundTag::class => empty($value = $tag->getValue())
-                ? "{}"
-                : "{{$innerTap}" . implode(
-                    ", $innerTap",
-                    array_map(fn($key) => (preg_match("/[^a-zA-Z0-9._+-]/", "$key")
-                            ? json_encode($key)
-                            : $key
-                        ) . ": " . self::toSnbtPretty($value[$key], $indentLevel + 1, $indentChar, $lineBreak),
-                        array_keys($value)
-                    )
-                ) . "$lineBreak$tap}",
-            ListTag::class     => empty($value = $tag->getValue())
-                ? "[]"
-                : "[$innerTap" . implode(
-                    ", $innerTap",
-                    array_map(fn($v) => self::toSnbtPretty($v, $indentLevel + 1, $indentChar, $lineBreak), $value)
-                ) . "$lineBreak$tap]",
+            CompoundTag::class => (function() use ($tag, $innerTap, $indentLevel, $indentChar, $lineBreak, $tap){
+                $value = $tag->getValue();
+                return $value === []
+                    ? "{}"
+                    : "{{$innerTap}" . implode(
+                        ", $innerTap",
+                        array_map(fn($key) => (preg_match("/[^a-zA-Z0-9._+-]/", "$key") === 1
+                                ? json_encode($key)
+                                : $key
+                            ) . ": " . self::toSnbtPretty($value[$key], $indentLevel + 1, $indentChar, $lineBreak),
+                            array_keys($value)
+                        )
+                    ) . "$lineBreak$tap}";
+            })(),
+            ListTag::class     => (function() use ($tag, $innerTap, $indentLevel, $indentChar, $lineBreak, $tap){
+                $value = $tag->getValue();
+                return $value === []
+                    ? "[]"
+                    : "[$innerTap" . implode(
+                        ", $innerTap",
+                        array_map(fn($v) => self::toSnbtPretty($v, $indentLevel + 1, $indentChar, $lineBreak), $value)
+                    ) . "$lineBreak$tap]";
+            })(),
             default            => self::toSnbt($tag)
         };
     }
