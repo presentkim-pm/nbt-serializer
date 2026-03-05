@@ -160,7 +160,7 @@ final class StringifiedNbtParser{
         }
 
         $value = substr($this->buffer, $offset, $closePos - $offset);
-        if(!preg_match("/^(\s*-?\d{0,3}b\s*(,|$)\s*)*$/", $value)){
+        if(preg_match("/^(\s*-?\d{0,3}b\s*(,|$)\s*)*$/", $value) !== 1){
             throw new SnbtSyntaxException("unexpected char", $offset, "byte entries");
         }
 
@@ -185,7 +185,7 @@ final class StringifiedNbtParser{
         }
 
         $value = substr($this->buffer, $offset, $closePos - $offset);
-        if(!preg_match("/^(\s*-?\d+\s*(,|$)\s*)*$/", $value)){
+        if(preg_match("/^(\s*-?\d+\s*(,|$)\s*)*$/", $value) !== 1){
             throw new SnbtSyntaxException("unexpected char", $offset, "integer entries");
         }
 

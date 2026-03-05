@@ -79,7 +79,11 @@ final class NbtSerializer{
 
     /** Deserialize the nbt tag from base64 string (with binary string) */
     public static function fromBase64(string $contents) : Tag{
-        return self::fromBinary(base64_decode($contents, true));
+        $decoded = base64_decode($contents, true);
+        if($decoded === false){
+            throw new \InvalidArgumentException('Invalid base64');
+        }
+        return self::fromBinary($decoded);
     }
 
     /** Serialize the nbt tag to hex string (with binary string) */
@@ -89,7 +93,11 @@ final class NbtSerializer{
 
     /** Deserialize the nbt tag from hex string (with binary string) */
     public static function fromHex(string $contents) : Tag{
-        return self::fromBinary(hex2bin($contents));
+        $decoded = hex2bin($contents);
+        if($decoded === false){
+            throw new \InvalidArgumentException('Invalid hex');
+        }
+        return self::fromBinary($decoded);
     }
 
     /** Serialize the nbt tag to SNBT (stringified Named Binary Tag) */
