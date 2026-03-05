@@ -237,11 +237,12 @@ final class StringifiedNbtParser{
         $substrOffset = $this->offset;
         while(true){
             $closePos = strpos($this->buffer, $quote, $this->offset);
-            $this->offset = $closePos + 1;
-
             if($closePos === false){
                 throw new SnbtUnexpectedEndException("'$quote'");
-            }elseif($this->buffer[$closePos - 1] === "\\"){
+            }
+
+            $this->offset = $closePos + 1;
+            if($this->buffer[$closePos - 1] === "\\"){
                 continue;
             }else{
                 return json_decode('"' . substr($this->buffer, $substrOffset, $closePos - $substrOffset) . '"');
