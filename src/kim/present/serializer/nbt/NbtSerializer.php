@@ -41,8 +41,6 @@ use pocketmine\nbt\tag\StringTag;
 use pocketmine\nbt\tag\Tag;
 use pocketmine\nbt\TreeRoot;
 
-use function array_keys;
-use function array_map;
 use function base64_decode;
 use function base64_encode;
 use function bin2hex;
@@ -52,16 +50,26 @@ use function implode;
 use function json_encode;
 use function preg_match;
 use function str_repeat;
-use function str_split;
+use function strlen;
+use function strspn;
+use function unpack;
 
 final class NbtSerializer{
+
+    private const SAFE_KEY_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._+-";
+
+    private static ?BigEndianNbtSerializer $binarySerializer = null;
+
+    private static function binarySerializer() : BigEndianNbtSerializer{
+        return self::$binarySerializer ??= new BigEndianNbtSerializer();
+    }
 
     /**
      * Serialize the nbt tag to binary string
      * Warning : There is a possibility of data corruption if used without any additional encoding.
      */
     public static function toBinary(Tag $tag) : string{
-        return (new BigEndianNbtSerializer())->write(new TreeRoot($tag));
+        return self::binarySerializer()->write(new TreeRoot($tag));
     }
 
     /**
@@ -69,7 +77,7 @@ final class NbtSerializer{
      * Warning : There is a possibility of data corruption if used without any additional encoding.
      */
     public static function fromBinary(string $contents) : Tag{
-        return (new BigEndianNbtSerializer())->read($contents)->getTag();
+        return self::binarySerializer()->read($contents)->getTag();
     }
 
     /** Serialize the nbt tag to base64 string (with binary string) */
@@ -102,49 +110,47 @@ final class NbtSerializer{
 
     /** Serialize the nbt tag to SNBT (stringified Named Binary Tag) */
     public static function toSnbt(Tag $tag) : string{
-        return match (get_class($tag)) {
-            ByteTag::class      => "{$tag->getValue()}b",
-            ShortTag::class     => "{$tag->getValue()}s",
-            IntTag::class       => "{$tag->getValue()}",
-            LongTag::class      => "{$tag->getValue()}l",
-            FloatTag::class     => "{$tag->getValue()}f",
-            DoubleTag::class    => "{$tag->getValue()}d",
-            StringTag::class    => (function() use ($tag){
+        switch(get_class($tag)){
+            case ByteTag::class:
+                return $tag->getValue() . "b";
+            case ShortTag::class:
+                return $tag->getValue() . "s";
+            case IntTag::class:
+                return (string) $tag->getValue();
+            case LongTag::class:
+                return $tag->getValue() . "l";
+            case FloatTag::class:
+                return $tag->getValue() . "f";
+            case DoubleTag::class:
+                return $tag->getValue() . "d";
+            case StringTag::class:
                 $j = json_encode($tag->getValue());
                 return $j !== false ? $j : '""';
-            })(),
-            CompoundTag::class  => (function() use ($tag){
-                $value = $tag->getValue();
-                return $value === []
-                    ? "{}"
-                    : "{" . implode(",", array_map(
-                        fn($key) => (preg_match("/[^a-zA-Z0-9._+-]/", "$key") === 1
-                                ? json_encode($key)
-                                : $key
-                            ) . ":" . self::toSnbt($value[$key]),
-                        array_keys($value)
-                    )) . "}";
-            })(),
-            ListTag::class      => (function() use ($tag){
-                $value = $tag->getValue();
-                return $value === []
-                    ? "[]"
-                    : "[" . implode(",", array_map(self::toSnbt(...), $value)) . "]";
-            })(),
-            ByteArrayTag::class => (function() use ($tag){
+            case CompoundTag::class:
+                $result = "";
+                foreach($tag->getValue() as $key => $child){
+                    $result .= ($result === "" ? "{" : ",") . self::encodeKey((string) $key) . ":" . self::toSnbt($child);
+                }
+                return $result === "" ? "{}" : $result . "}";
+            case ListTag::class:
+                $result = "";
+                foreach($tag->getValue() as $child){
+                    $result .= ($result === "" ? "[" : ",") . self::toSnbt($child);
+                }
+                return $result === "" ? "[]" : $result . "]";
+            case ByteArrayTag::class:
                 $value = $tag->getValue();
                 return $value === ''
                     ? "[B;]"
-                    : "[B;" . implode("b,", array_map(ord(...), str_split($value))) . "b]";
-            })(),
-            IntArrayTag::class  => (function() use ($tag){
+                    : "[B;" . implode("b,", unpack("C*", $value)) . "b]";
+            case IntArrayTag::class:
                 $value = $tag->getValue();
                 return $value === []
                     ? "[I;]"
                     : "[I;" . implode(",", $value) . "]";
-            })(),
-            default             => throw new \InvalidArgumentException("Unknown tag type " . get_class($tag))
-        };
+            default:
+                throw new \InvalidArgumentException("Unknown tag type " . get_class($tag));
+        }
     }
 
     /**
@@ -157,34 +163,40 @@ final class NbtSerializer{
         string $indentChar = "    ",
         string $lineBreak = "\n"
     ) : string{
+        $class = get_class($tag);
+        if($class !== CompoundTag::class && $class !== ListTag::class){
+            return self::toSnbt($tag);
+        }
+
+        $value = $tag->getValue();
+        if($value === []){
+            return $class === CompoundTag::class ? "{}" : "[]";
+        }
+
         $tap = str_repeat($indentChar, $indentLevel);
         $innerTap = "$lineBreak$tap$indentChar";
-        return match (get_class($tag)) {
-            CompoundTag::class => (function() use ($tag, $innerTap, $indentLevel, $indentChar, $lineBreak, $tap){
-                $value = $tag->getValue();
-                return $value === []
-                    ? "{}"
-                    : "{{$innerTap}" . implode(
-                        ", $innerTap",
-                        array_map(fn($key) => (preg_match("/[^a-zA-Z0-9._+-]/", "$key") === 1
-                                ? json_encode($key)
-                                : $key
-                            ) . ": " . self::toSnbtPretty($value[$key], $indentLevel + 1, $indentChar, $lineBreak),
-                            array_keys($value)
-                        )
-                    ) . "$lineBreak$tap}";
-            })(),
-            ListTag::class     => (function() use ($tag, $innerTap, $indentLevel, $indentChar, $lineBreak, $tap){
-                $value = $tag->getValue();
-                return $value === []
-                    ? "[]"
-                    : "[$innerTap" . implode(
-                        ", $innerTap",
-                        array_map(fn($v) => self::toSnbtPretty($v, $indentLevel + 1, $indentChar, $lineBreak), $value)
-                    ) . "$lineBreak$tap]";
-            })(),
-            default            => self::toSnbt($tag)
-        };
+        $separator = ", $innerTap";
+        $next = $indentLevel + 1;
+        $result = "";
+        if($class === CompoundTag::class){
+            foreach($value as $key => $child){
+                $result .= ($result === "" ? "{" . $innerTap : $separator)
+                    . self::encodeKey((string) $key) . ": "
+                    . self::toSnbtPretty($child, $next, $indentChar, $lineBreak);
+            }
+            return "$result$lineBreak$tap}";
+        }
+
+        foreach($value as $child){
+            $result .= ($result === "" ? "[" . $innerTap : $separator)
+                . self::toSnbtPretty($child, $next, $indentChar, $lineBreak);
+        }
+        return "$result$lineBreak$tap]";
+    }
+
+    /** Quote the compound key only when it contains characters outside of [a-zA-Z0-9._+-] */
+    private static function encodeKey(string $key) : string{
+        return strspn($key, self::SAFE_KEY_CHARS) === strlen($key) ? $key : json_encode($key);
     }
 
     /** Deserialize the nbt tag from SNBT (stringified Named Binary Tag) */
