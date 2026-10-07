@@ -30,6 +30,28 @@
 
 ---
 
+## Optimization results (`refactor/perf-improve`)
+
+Comparison of the NBT handling only (no other serialization formats), measured before and after the optimization of SNBT serialization/parsing.
+
+- **Environment** : PHP 8.3.6 (NTS), `pocketmine/nbt` 1.2
+- **Method** : a random NBT tree (60 top-level entries, mixed tag types) processed 1000 times, median of 3 runs
+- **Before** : `1d3344d` / **After** : this branch
+
+| Operation          | Before | After | Change |
+|--------------------|-------:|------:|-------:|
+| `toSnbt`           | 103 µs | 85 µs |   -17% |
+| `toSnbtPretty`     | 146 µs | 112 µs |  -23% |
+| `fromSnbt`         | 307 µs | 271 µs |  -12% |
+| `fromSnbt` (pretty input) | 484 µs | 425 µs | -12% |
+| `toBinary`         |  90 µs | 89 µs |  (noise) |
+| `fromBinary`       | 241 µs | 240 µs |  (noise) |
+
+Binary (de)serialization is dominated by `pocketmine/nbt` itself, so it is unchanged.
+The output of every operation was verified to be byte-identical to the previous implementation.
+
+---
+
 ## Result tables
 
 | ![BYTE 0](https://img.shields.io/badge/BYTE-0-grey?style=for-the-badge&labelColor=blue) |                                                                                                 serialize-time |                                                                                         deserialize-time |                                                                                              serialized-size |                                                                                                   escaped-size |

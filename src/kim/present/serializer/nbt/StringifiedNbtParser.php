@@ -49,6 +49,8 @@ use function json_decode;
 use function preg_match;
 use function preg_match_all;
 use function str_contains;
+use function strcspn;
+use function strlen;
 use function strpos;
 use function strtolower;
 use function strtoupper;
@@ -68,6 +70,16 @@ final class StringifiedNbtParser{
         $value = "";
 
         while(isset($this->buffer[$this->offset])){
+            // consume the plain run of characters up to the next structural character at once
+            $runLength = strcspn($this->buffer, ",}]\"'{[", $this->offset);
+            if($runLength > 0){
+                $value .= substr($this->buffer, $this->offset, $runLength);
+                $this->offset += $runLength;
+                if(!isset($this->buffer[$this->offset])){
+                    break;
+                }
+            }
+
             $c = $this->buffer[$this->offset++];
             if($c === "," || $c === "}" || $c === "]"){ // end of parent tag
                 $this->offset--;
@@ -82,22 +94,18 @@ final class StringifiedNbtParser{
                 return $this->readCompoundTag();
             }
 
-            if($c === "["){ // start of collection
-                if(isset($this->buffer[$this->offset + 2])){
-                    $listHead = strtoupper(substr($this->buffer, $this->offset, 2));
-                    if($listHead === "B;"){
-                        $this->offset += 2;
-                        return $this->getByteArrayTag();
-                    }elseif($listHead === "I;"){
-                        $this->offset += 2;
-                        return $this->getIntArrayTag();
-                    }
+            // start of collection
+            if(isset($this->buffer[$this->offset + 2])){
+                $listHead = strtoupper(substr($this->buffer, $this->offset, 2));
+                if($listHead === "B;"){
+                    $this->offset += 2;
+                    return $this->getByteArrayTag();
+                }elseif($listHead === "I;"){
+                    $this->offset += 2;
+                    return $this->getIntArrayTag();
                 }
-                return $this->getListTag();
             }
-
-            //any other character
-            $value .= $c;
+            return $this->getListTag();
         }
 
         $value = trim($value);
@@ -245,7 +253,14 @@ final class StringifiedNbtParser{
             if($this->buffer[$closePos - 1] === "\\"){
                 continue;
             }else{
-                return json_decode('"' . substr($this->buffer, $substrOffset, $closePos - $substrOffset) . '"');
+                $raw = substr($this->buffer, $substrOffset, $closePos - $substrOffset);
+                // fast path : no escapes, no control characters and valid UTF-8 means json_decode is an identity
+                if(strcspn($raw, "\\\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f") === strlen($raw)
+                    && preg_match("//u", $raw) === 1
+                ){
+                    return $raw;
+                }
+                return json_decode('"' . $raw . '"');
             }
         }
     }
