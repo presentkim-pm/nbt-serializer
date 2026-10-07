@@ -48,7 +48,6 @@ use function get_class;
 use function hex2bin;
 use function implode;
 use function json_encode;
-use function preg_match;
 use function str_repeat;
 use function strlen;
 use function strspn;
@@ -69,7 +68,7 @@ final class NbtSerializer{
      * Warning : There is a possibility of data corruption if used without any additional encoding.
      */
     public static function toBinary(Tag $tag) : string{
-        return self::binarySerializer()->write(new TreeRoot($tag));
+        return BigEndianNbtCodec::encode($tag) ?? self::binarySerializer()->write(new TreeRoot($tag));
     }
 
     /**
@@ -77,7 +76,7 @@ final class NbtSerializer{
      * Warning : There is a possibility of data corruption if used without any additional encoding.
      */
     public static function fromBinary(string $contents) : Tag{
-        return self::binarySerializer()->read($contents)->getTag();
+        return BigEndianNbtCodec::decode($contents);
     }
 
     /** Serialize the nbt tag to base64 string (with binary string) */
@@ -127,17 +126,17 @@ final class NbtSerializer{
                 $j = json_encode($tag->getValue());
                 return $j !== false ? $j : '""';
             case CompoundTag::class:
-                $result = "";
+                $parts = [];
                 foreach($tag->getValue() as $key => $child){
-                    $result .= ($result === "" ? "{" : ",") . self::encodeKey((string) $key) . ":" . self::toSnbt($child);
+                    $parts[] = self::encodeKey((string) $key) . ":" . self::toSnbt($child);
                 }
-                return $result === "" ? "{}" : $result . "}";
+                return "{" . implode(",", $parts) . "}";
             case ListTag::class:
-                $result = "";
+                $parts = [];
                 foreach($tag->getValue() as $child){
-                    $result .= ($result === "" ? "[" : ",") . self::toSnbt($child);
+                    $parts[] = self::toSnbt($child);
                 }
-                return $result === "" ? "[]" : $result . "]";
+                return "[" . implode(",", $parts) . "]";
             case ByteArrayTag::class:
                 $value = $tag->getValue();
                 return $value === ''
