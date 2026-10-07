@@ -51,6 +51,7 @@ use function preg_match_all;
 use function str_contains;
 use function strcspn;
 use function strlen;
+use function strspn;
 use function strpos;
 use function strtolower;
 use function strtoupper;
@@ -58,6 +59,9 @@ use function substr;
 use function trim;
 
 final class StringifiedNbtParser{
+
+    /** Separators skipped between entries : a comma and every character that is less than or equal to a space */
+    private const SEPARATORS = "," . "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f ";
 
     private string $buffer;
     private int $offset = 0;
@@ -139,12 +143,13 @@ final class StringifiedNbtParser{
 
     private function getListTag() : ListTag{
         $result = new ListTag();
-        while(isset($this->buffer[$this->offset])){
-            $c = $this->buffer[$this->offset++];
-            if($c === "," || $c <= " "){
-                continue;
+        while(true){
+            $this->offset += strspn($this->buffer, self::SEPARATORS, $this->offset);
+            if(!isset($this->buffer[$this->offset])){
+                break;
             }
 
+            $c = $this->buffer[$this->offset++];
             if($c === "]"){
                 return $result;
             }
@@ -208,12 +213,13 @@ final class StringifiedNbtParser{
 
     private function readCompoundTag() : CompoundTag{
         $tag = CompoundTag::create();
-        while(isset($this->buffer[$this->offset])){
-            $c = $this->buffer[$this->offset++];
-            if($c === "," || $c <= " "){
-                continue;
+        while(true){
+            $this->offset += strspn($this->buffer, self::SEPARATORS, $this->offset);
+            if(!isset($this->buffer[$this->offset])){
+                break;
             }
 
+            $c = $this->buffer[$this->offset++];
             if($c === "}"){
                 return $tag;
             }
