@@ -42,7 +42,6 @@ use pocketmine\nbt\tag\ShortTag;
 use pocketmine\nbt\tag\StringTag;
 use pocketmine\nbt\tag\Tag;
 
-use function addcslashes;
 use function chr;
 use function is_numeric;
 use function json_decode;
@@ -53,7 +52,6 @@ use function strcspn;
 use function strlen;
 use function strspn;
 use function strpos;
-use function strtolower;
 use function strtoupper;
 use function substr;
 use function trim;
@@ -63,6 +61,15 @@ final class StringifiedNbtParser{
     /** Separators skipped between entries : a comma and every character that is less than or equal to a space */
     private const SEPARATORS = "," . "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f ";
 
+    /** Type suffix characters (case-insensitive) mapped to their lowercase form */
+    private const SUFFIXES = [
+        "b" => "b", "B" => "b",
+        "s" => "s", "S" => "s",
+        "l" => "l", "L" => "l",
+        "f" => "f", "F" => "f",
+        "d" => "d", "D" => "d",
+    ];
+
     private string $buffer;
     private int $offset = 0;
 
@@ -71,74 +78,61 @@ final class StringifiedNbtParser{
     }
 
     public function readTag() : Tag{
-        $value = "";
+        $buffer = $this->buffer;
+        $offset = $this->offset;
 
-        while(isset($this->buffer[$this->offset])){
-            // consume the plain run of characters up to the next structural character at once
-            $runLength = strcspn($this->buffer, ",}]\"'{[", $this->offset);
-            if($runLength > 0){
-                $value .= substr($this->buffer, $this->offset, $runLength);
-                $this->offset += $runLength;
-                if(!isset($this->buffer[$this->offset])){
-                    break;
-                }
+        // consume the plain run of characters up to the next structural character at once
+        $runLength = isset($buffer[$offset]) ? strcspn($buffer, ",}]\"'{[", $offset) : 0;
+        $end = $offset + $runLength;
+        $c = $buffer[$end] ?? null;
+
+        if($c === null || $c === "," || $c === "}" || $c === "]"){ // end of the value (or of the parent tag)
+            $this->offset = $end;
+            $value = trim(substr($buffer, $offset, $runLength));
+            if($value === ""){
+                throw new SnbtDataException("empty value in ''", $end);
             }
 
-            $c = $this->buffer[$this->offset++];
-            if($c === "," || $c === "}" || $c === "]"){ // end of parent tag
-                $this->offset--;
-                break;
+            $last = self::SUFFIXES[$value[-1]] ?? null;
+            if($last !== null){
+                $value = substr($value, 0, -1);
             }
 
-            if($c === '"' || $c === "'"){ // start of quoted string
-                return new StringTag($this->readEscapedString($c));
+            if(is_numeric($value)){
+                return match ($last) {
+                    "b"     => new ByteTag((int) $value),
+                    "s"     => new ShortTag((int) $value),
+                    "l"     => new LongTag((int) $value),
+                    "f"     => new FloatTag((float) $value),
+                    "d"     => new DoubleTag((float) $value),
+                    default => str_contains($value, ".") ? new DoubleTag((float) $value) : new IntTag((int) $value)
+                };
             }
 
-            if($c === "{"){ // start of compound tag
-                return $this->readCompoundTag();
-            }
-
-            // start of collection
-            if(isset($this->buffer[$this->offset + 2])){
-                $listHead = strtoupper(substr($this->buffer, $this->offset, 2));
-                if($listHead === "B;"){
-                    $this->offset += 2;
-                    return $this->getByteArrayTag();
-                }elseif($listHead === "I;"){
-                    $this->offset += 2;
-                    return $this->getIntArrayTag();
-                }
-            }
-            return $this->getListTag();
+            return new StringTag($value . $last);
         }
 
-        $value = trim($value);
-        if($value === ""){
-            throw new SnbtDataException(
-                "empty value in '" . addcslashes($value, "\r\n ") . "'",
-                $this->offset
-            );
+        $this->offset = $end + 1;
+        if($c === '"' || $c === "'"){ // start of quoted string
+            return new StringTag($this->readEscapedString($c));
         }
 
-        $last = strtolower($value[-1]);
-        if($last === "b" || $last === "s" || $last === "l" || $last === "f" || $last === "d"){
-            $value = substr($value, 0, -1);
-        }else{
-            $last = null;
+        if($c === "{"){ // start of compound tag
+            return $this->readCompoundTag();
         }
 
-        if(is_numeric($value)){
-            return match ($last) {
-                "b"     => new ByteTag((int) $value),
-                "s"     => new ShortTag((int) $value),
-                "l"     => new LongTag((int) $value),
-                "f"     => new FloatTag((float) $value),
-                "d"     => new DoubleTag((float) $value),
-                default => str_contains($value, ".") ? new DoubleTag((float) $value) : new IntTag((int) $value)
-            };
+        // start of collection
+        if(isset($buffer[$this->offset + 2])){
+            $listHead = strtoupper(substr($buffer, $this->offset, 2));
+            if($listHead === "B;"){
+                $this->offset += 2;
+                return $this->getByteArrayTag();
+            }elseif($listHead === "I;"){
+                $this->offset += 2;
+                return $this->getIntArrayTag();
+            }
         }
-
-        return new StringTag($value . $last);
+        return $this->getListTag();
     }
 
     private function getListTag() : ListTag{

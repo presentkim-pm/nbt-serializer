@@ -48,7 +48,6 @@ use function get_class;
 use function hex2bin;
 use function implode;
 use function json_encode;
-use function preg_match;
 use function str_repeat;
 use function strlen;
 use function strspn;
@@ -127,17 +126,17 @@ final class NbtSerializer{
                 $j = json_encode($tag->getValue());
                 return $j !== false ? $j : '""';
             case CompoundTag::class:
-                $result = "";
+                $parts = [];
                 foreach($tag->getValue() as $key => $child){
-                    $result .= ($result === "" ? "{" : ",") . self::encodeKey((string) $key) . ":" . self::toSnbt($child);
+                    $parts[] = self::encodeKey((string) $key) . ":" . self::toSnbt($child);
                 }
-                return $result === "" ? "{}" : $result . "}";
+                return "{" . implode(",", $parts) . "}";
             case ListTag::class:
-                $result = "";
+                $parts = [];
                 foreach($tag->getValue() as $child){
-                    $result .= ($result === "" ? "[" : ",") . self::toSnbt($child);
+                    $parts[] = self::toSnbt($child);
                 }
-                return $result === "" ? "[]" : $result . "]";
+                return "[" . implode(",", $parts) . "]";
             case ByteArrayTag::class:
                 $value = $tag->getValue();
                 return $value === ''
