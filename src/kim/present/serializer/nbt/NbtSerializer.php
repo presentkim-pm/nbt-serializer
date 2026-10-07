@@ -68,7 +68,7 @@ final class NbtSerializer{
      * Warning : There is a possibility of data corruption if used without any additional encoding.
      */
     public static function toBinary(Tag $tag) : string{
-        return self::binarySerializer()->write(new TreeRoot($tag));
+        return BigEndianNbtCodec::encode($tag) ?? self::binarySerializer()->write(new TreeRoot($tag));
     }
 
     /**
@@ -76,7 +76,7 @@ final class NbtSerializer{
      * Warning : There is a possibility of data corruption if used without any additional encoding.
      */
     public static function fromBinary(string $contents) : Tag{
-        return self::binarySerializer()->read($contents)->getTag();
+        return BigEndianNbtCodec::decode($contents);
     }
 
     /** Serialize the nbt tag to base64 string (with binary string) */
