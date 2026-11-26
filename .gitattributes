@@ -1,2 +1,8 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Exclude development files from the distributed package
+/.github export-ignore
+/tests export-ignore
+/phpunit.xml.dist export-ignore
+/PERFORMANCE.md export-ignore

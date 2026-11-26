@@ -1,7 +1,8 @@
 <!-- PROJECT BADGES -->
 <div align="center">
 
-[![Poggit CI][poggit-ci-badge]][poggit-ci-url]
+[![CI][ci-badge]][ci-url]
+[![PHP][php-badge]][php-url]
 [![Stars][stars-badge]][stars-url]
 [![License][license-badge]][license-url]
 
@@ -15,7 +16,7 @@
   <p align="center">
     A powerful library that makes (de)serializing NBT shorter, faster, and easier!
 
-[View in Poggit][poggit-ci-url] · [Report a bug][issues-url] · [Request a feature][issues-url]
+[View on GitHub][repo-url] · [Report a bug][issues-url] · [Request a feature][issues-url]
 
   </p>
 </div>
@@ -26,6 +27,16 @@
 
 This library provides the most convenient and high-performance tools for handling NBT, including **SNBT** support.
 Supports multiple serialization formats to fit various use cases, from human-readable strings to compact binary representations.  
+
+### Requirements
+| | Version |
+|---|---|
+| Server | [axolotl-pm/PocketMine-MP][axolotl-url] |
+| PHP | **8.4** or newer |
+| [pocketmine/nbt][nbt-url] | `^1.2` (bundled with the server) |
+
+> Looking for the version for the original [pmmp/PocketMine-MP](https://github.com/pmmp/PocketMine-MP) 5.x (Poggit virion)?  
+> See the [`legacy/pmmp-5.44`][legacy-url] branch.
 
 ---
 
@@ -52,8 +63,8 @@ kim\present\serializer\nbt\NbtSerializer::fromSnbt(string $contents) : Tag
         itemType: "weapon",
         stats: {
             attackDamage: 20,
-            criticalChance: 15f,
-            skill: "Dragon\u2019s Breath"
+            criticalChance: 15.0f,
+            skill: "Dragon’s Breath"
         },
         generatedBy: "GPT"
     }
@@ -68,7 +79,16 @@ This format is commonly used in Minecraft commands, data packs, and debugging wo
 This format is highly accessible compared to its binary equivalent, making it ideal for debugging or manual editing.  
 The **nbt-serializer** library ensures **efficient** and **accurate** SNBT serialization and deserialization, saving you time and effort!
 
-For more details, see [Official SNBT Documentation](https://minecraft.fandom.com/wiki/NBT_format#SNBT_format).
+For more details, see [Official SNBT Documentation](https://minecraft.wiki/w/NBT_format#SNBT_format).
+
+#### Format notes
+- `fromSnbt()` throws `pocketmine\nbt\NbtDataException` (or its subclasses) for every invalid input,
+  including out of range numbers, mixed list entry types and trailing data after the value.
+- Floating point values are written without precision loss (e.g. `0.30000000000000004d`),
+  and non-finite values are written as `NaN`, `Infinity` and `-Infinity` with the `f` / `d` suffix.
+- Strings are quoted with `"` and only quotes, backslashes and control characters are escaped,
+  so every byte (including invalid UTF-8) is preserved.
+- Both `"` and `'` quoted strings are accepted, with the `\\`, `\"`, `\'`, `\n`, `\t`, `\uXXXX`, ... escapes.
 
 #### Use Cases
 - **Searchable Databases**: Store NBT data in SNBT format to enable fast and human-readable queries in databases.
@@ -79,7 +99,7 @@ For more details, see [Official SNBT Documentation](https://minecraft.fandom.com
 ---
 
 ### 2. Binary Serialization
-Efficiently serialize NBT tags into a compact binary format using the `BigEndianNbtSerializer`.
+Efficiently serialize NBT tags into a compact big endian binary format (byte-for-byte identical to `pocketmine\nbt\BigEndianNbtSerializer`).
 
 #### Supported Functions
 ```php
@@ -150,9 +170,21 @@ See [Performance Test Results][performance-url]
 
 -----
 
-## 🛠️ How to installation
+## 🛠️ Installation
 
-See [Official Poggit Virion Documentation](https://github.com/poggit/support/blob/master/virion.md)
+Install with [Composer](https://getcomposer.org) :
+```bash
+composer require presentkim/nbt-serializer
+```
+
+When distributing a plugin, bundle the `vendor` directory into the plugin and load `vendor/autoload.php` (e.g. in `onLoad()`).  
+Since the library is no longer shaded as a virion, use a single copy of it per server (or prefix the namespace with a tool such as [PHP-Scoper](https://github.com/humbug/php-scoper)) to avoid class conflicts between plugins.
+
+### Running tests
+```bash
+composer install
+composer test
+```
 
 -----
 
@@ -161,13 +193,25 @@ See [Official Poggit Virion Documentation](https://github.com/poggit/support/blo
 Distributed under the **MIT**. See [LICENSE][license-url] for more information
 
 
-[poggit-ci-badge]: https://poggit.pmmp.io/ci.shield/presentkim-pm/nbt-serializer/nbt-serializer?style=for-the-badge
+[ci-badge]: https://img.shields.io/github/actions/workflow/status/presentkim-pm/nbt-serializer/ci.yml?branch=main&style=for-the-badge
+
+[php-badge]: https://img.shields.io/badge/php-%3E%3D8.4-777BB4.svg?style=for-the-badge
 
 [stars-badge]: https://img.shields.io/github/stars/presentkim-pm/nbt-serializer.svg?style=for-the-badge
 
 [license-badge]: https://img.shields.io/github/license/presentkim-pm/nbt-serializer.svg?style=for-the-badge
 
-[poggit-ci-url]: https://poggit.pmmp.io/ci/presentkim-pm/nbt-serializer/nbt-serializer
+[ci-url]: https://github.com/presentkim-pm/nbt-serializer/actions/workflows/ci.yml
+
+[php-url]: https://www.php.net/releases/8.4/
+
+[repo-url]: https://github.com/presentkim-pm/nbt-serializer
+
+[axolotl-url]: https://github.com/axolotl-pm/PocketMine-MP
+
+[nbt-url]: https://github.com/pmmp/NBT
+
+[legacy-url]: https://github.com/presentkim-pm/nbt-serializer/tree/legacy/pmmp-5.44
 
 [stars-url]: https://github.com/presentkim-pm/nbt-serializer/stargazers
 

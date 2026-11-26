@@ -30,7 +30,7 @@ use pocketmine\nbt\NbtDataException;
 
 class SnbtSyntaxException extends NbtDataException{
 
-    public function __construct(string $message, int $offset = null, string $expected = null){
+    public function __construct(string $message, ?int $offset = null, ?string $expected = null){
         if($offset !== null){
             $message .= " at offset $offset";
         }

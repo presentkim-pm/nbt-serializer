@@ -27,6 +27,7 @@ declare(strict_types=1);
 namespace kim\present\serializer\nbt;
 
 use pocketmine\nbt\BigEndianNbtSerializer;
+use pocketmine\nbt\NbtDataException;
 use pocketmine\nbt\tag\ByteArrayTag;
 use pocketmine\nbt\tag\ByteTag;
 use pocketmine\nbt\tag\CompoundTag;
@@ -44,20 +45,33 @@ use pocketmine\nbt\TreeRoot;
 use function base64_decode;
 use function base64_encode;
 use function bin2hex;
+use function chr;
 use function get_class;
 use function hex2bin;
+use function dechex;
 use function implode;
-use function json_encode;
+use function is_finite;
+use function is_nan;
+use function str_pad;
 use function str_repeat;
 use function strlen;
+use function strcspn;
 use function strspn;
+use function strtr;
 use function unpack;
+use function var_export;
 
 final class NbtSerializer{
 
     private const SAFE_KEY_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._+-";
 
+    /** Characters that must be escaped in quoted strings : quotes, backslashes and control characters */
+    private const ESCAPE_CHARS = "\"\\\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f\x7f";
+
     private static ?BigEndianNbtSerializer $binarySerializer = null;
+
+    /** @var array<string, string>|null */
+    private static ?array $escapeMap = null;
 
     private static function binarySerializer() : BigEndianNbtSerializer{
         return self::$binarySerializer ??= new BigEndianNbtSerializer();
@@ -119,12 +133,11 @@ final class NbtSerializer{
             case LongTag::class:
                 return $tag->getValue() . "l";
             case FloatTag::class:
-                return $tag->getValue() . "f";
+                return self::encodeFloat($tag->getValue()) . "f";
             case DoubleTag::class:
-                return $tag->getValue() . "d";
+                return self::encodeFloat($tag->getValue()) . "d";
             case StringTag::class:
-                $j = json_encode($tag->getValue());
-                return $j !== false ? $j : '""';
+                return self::quoteString($tag->getValue());
             case CompoundTag::class:
                 $parts = [];
                 foreach($tag->getValue() as $key => $child){
@@ -141,7 +154,7 @@ final class NbtSerializer{
                 $value = $tag->getValue();
                 return $value === ''
                     ? "[B;]"
-                    : "[B;" . implode("b,", unpack("C*", $value)) . "b]";
+                    : "[B;" . implode("b,", unpack("c*", $value)) . "b]";
             case IntArrayTag::class:
                 $value = $tag->getValue();
                 return $value === []
@@ -193,14 +206,54 @@ final class NbtSerializer{
         return "$result$lineBreak$tap]";
     }
 
-    /** Quote the compound key only when it contains characters outside of [a-zA-Z0-9._+-] */
+    /** Quote the compound key only when it is empty or contains characters outside of [a-zA-Z0-9._+-] */
     private static function encodeKey(string $key) : string{
-        return strspn($key, self::SAFE_KEY_CHARS) === strlen($key) ? $key : json_encode($key);
+        return $key !== "" && strspn($key, self::SAFE_KEY_CHARS) === strlen($key) ? $key : self::quoteString($key);
     }
 
-    /** Deserialize the nbt tag from SNBT (stringified Named Binary Tag) */
+    /**
+     * Format the float without losing precision (shortest round-trip representation).
+     * Non-finite values are written as NaN, Infinity and -Infinity.
+     */
+    private static function encodeFloat(float $value) : string{
+        if(is_finite($value)){
+            return var_export($value, true);
+        }
+        return is_nan($value) ? "NaN" : ($value > 0 ? "Infinity" : "-Infinity");
+    }
+
+    /**
+     * Quote the string with double quotes, escaping only quotes, backslashes and control characters.
+     * Other bytes are written as-is, so strings that are not valid UTF-8 are preserved too.
+     */
+    private static function quoteString(string $value) : string{
+        if(strcspn($value, self::ESCAPE_CHARS) === strlen($value)){
+            return '"' . $value . '"';
+        }
+        return '"' . strtr($value, self::$escapeMap ??= self::buildEscapeMap()) . '"';
+    }
+
+    /** @return array<string, string> */
+    private static function buildEscapeMap() : array{
+        $map = ['"' => '\\"', "\\" => "\\\\", "\x7f" => "\\u007f"];
+        for($i = 0; $i < 0x20; ++$i){
+            $map[chr($i)] = "\\u" . str_pad(dechex($i), 4, "0", STR_PAD_LEFT);
+        }
+        $map["\n"] = "\\n";
+        $map["\r"] = "\\r";
+        $map["\t"] = "\\t";
+        $map["\x08"] = "\\b";
+        $map["\x0c"] = "\\f";
+        return $map;
+    }
+
+    /**
+     * Deserialize the nbt tag from SNBT (stringified Named Binary Tag)
+     *
+     * @throws NbtDataException if the contents are not a single valid SNBT value
+     */
     public static function fromSnbt(string $contents) : Tag{
-        return (new StringifiedNbtParser($contents))->readTag();
+        return (new StringifiedNbtParser($contents))->readRoot();
     }
 
 }

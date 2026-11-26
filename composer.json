@@ -1,22 +1,29 @@
 {
   "name": "presentkim/nbt-serializer",
-  "description": "Provides util class for (de)serialize nbt tag more shorter and easier for PocketMine-MP",
+  "description": "Provides util class for (de)serialize nbt tag more shorter and easier for axolotl-pm/PocketMine-MP",
   "type": "library",
   "license": "MIT",
   "require": {
-    "pocketmine/pocketmine-mp": "^5.0.0"
+    "php": "^8.4",
+    "pocketmine/nbt": "^1.2"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^12.0"
   },
   "autoload": {
     "psr-4": {
-      "kim\\present\\serializer\\nbt\\": [
-        "src/kim/present/serializer/nbt"
-      ]
+      "kim\\present\\serializer\\nbt\\": "src/kim/present/serializer/nbt"
     }
   },
-  "extra": {
-    "virion": {
-      "spec": "3.0",
-      "namespace-root": "kim\\present\\serializer\\nbt"
+  "autoload-dev": {
+    "psr-4": {
+      "kim\\present\\serializer\\nbt\\tests\\": "tests"
     }
+  },
+  "scripts": {
+    "test": "phpunit"
+  },
+  "config": {
+    "sort-packages": true
   }
 }
