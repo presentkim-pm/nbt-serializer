@@ -410,15 +410,16 @@ final class NbtSerializer{
      * Non-finite values are written as NaN, Infinity and -Infinity.
      */
     private static function encodeFloat(float $value) : string{
+        // checked first : PHP 8.5+ warns when NAN is coerced to string
+        if(!is_finite($value)){
+            return is_nan($value) ? "NaN" : ($value > 0 ? "Infinity" : "-Infinity");
+        }
         // fast path : the short representation (precision ini, 14 digits by default) when it is lossless
         $short = (string) $value;
         if((float) $short === $value){
             return $short;
         }
-        if(is_finite($value)){
-            return var_export($value, true);
-        }
-        return is_nan($value) ? "NaN" : ($value > 0 ? "Infinity" : "-Infinity");
+        return var_export($value, true);
     }
 
     /**
