@@ -50,15 +50,16 @@ use function substr;
 use function unpack;
 
 /**
- * Big endian NBT codec producing and accepting exactly the same bytes (and failing with the same exceptions)
- * as {@see \pocketmine\nbt\BigEndianNbtSerializer}, without its per-value stream and closure overhead.
+ * Binary NBT codec producing and accepting exactly the same bytes (and failing with the same exceptions)
+ * as {@see \pocketmine\nbt\BigEndianNbtSerializer} and {@see \pocketmine\nbt\LittleEndianNbtSerializer},
+ * without their per-value stream and closure overhead.
  *
  * The only intended difference : negative values of TAG_Int_Array are decoded with their sign,
  * while pocketmine/nbt decodes them as unsigned 32-bit values.
  *
  * @internal
  */
-final class BigEndianNbtCodec{
+final class BinaryNbtCodec{
 
     private const TYPE_BYTE = 1;
     private const TYPE_SHORT = 2;
@@ -88,8 +89,23 @@ final class BigEndianNbtCodec{
 
     private const MAX_STRING_LENGTH = 32767;
 
-    private function __construct(){
-        //NOOP
+    private static ?self $big = null;
+    private static ?self $little = null;
+
+    /** pack() format of unsigned short, unsigned int, long, float and double */
+    private function __construct(
+        private readonly string $short,
+        private readonly string $int,
+        private readonly string $long,
+        private readonly string $float,
+        private readonly string $double
+    ){
+    }
+
+    public static function get(Endian $endian) : self{
+        return $endian === Endian::BIG
+            ? self::$big ??= new self("n", "N", "J", "G", "E")
+            : self::$little ??= new self("v", "V", "P", "g", "e");
     }
 
     /**
@@ -97,54 +113,54 @@ final class BigEndianNbtCodec{
      *
      * @return string|null null if the tree contains a tag type that this codec does not know
      */
-    public static function encode(Tag $tag) : ?string{
+    public function encode(Tag $tag) : ?string{
         $type = self::TYPE_OF_CLASS[get_class($tag)] ?? null;
         if($type === null){
             return null;
         }
 
         $out = chr($type) . "\x00\x00";
-        return self::writeBody($tag, $type, $out) ? $out : null;
+        return $this->writeBody($tag, $type, $out) ? $out : null;
     }
 
-    private static function writeBody(Tag $tag, int $type, string &$out) : bool{
+    private function writeBody(Tag $tag, int $type, string &$out) : bool{
         switch($type){
             case self::TYPE_BYTE:
                 $out .= chr($tag->getValue() & 0xff);
                 return true;
             case self::TYPE_SHORT:
-                $out .= pack("n", $tag->getValue());
+                $out .= pack($this->short, $tag->getValue());
                 return true;
             case self::TYPE_INT:
-                $out .= pack("N", $tag->getValue());
+                $out .= pack($this->int, $tag->getValue());
                 return true;
             case self::TYPE_LONG:
-                $out .= pack("J", $tag->getValue());
+                $out .= pack($this->long, $tag->getValue());
                 return true;
             case self::TYPE_FLOAT:
-                $out .= pack("G", $tag->getValue());
+                $out .= pack($this->float, $tag->getValue());
                 return true;
             case self::TYPE_DOUBLE:
-                $out .= pack("E", $tag->getValue());
+                $out .= pack($this->double, $tag->getValue());
                 return true;
             case self::TYPE_BYTE_ARRAY:
                 $value = $tag->getValue();
-                $out .= pack("N", strlen($value)) . $value;
+                $out .= pack($this->int, strlen($value)) . $value;
                 return true;
             case self::TYPE_STRING:
                 $value = $tag->getValue();
-                $out .= pack("n", self::checkWriteStringLength(strlen($value))) . $value;
+                $out .= pack($this->short, self::checkWriteStringLength(strlen($value))) . $value;
                 return true;
             case self::TYPE_INT_ARRAY:
                 $value = $tag->getValue();
-                $out .= pack("N", count($value)) . pack("N*", ...$value);
+                $out .= pack($this->int, count($value)) . pack($this->int . "*", ...$value);
                 return true;
             case self::TYPE_LIST:
                 $children = $tag->getValue();
-                $out .= chr($tag->getTagType() & 0xff) . pack("N", count($children));
+                $out .= chr($tag->getTagType() & 0xff) . pack($this->int, count($children));
                 foreach($children as $child){
                     $childType = self::TYPE_OF_CLASS[get_class($child)] ?? null;
-                    if($childType === null || !self::writeBody($child, $childType, $out)){
+                    if($childType === null || !$this->writeBody($child, $childType, $out)){
                         return false;
                     }
                 }
@@ -157,8 +173,8 @@ final class BigEndianNbtCodec{
                     }
 
                     $name = (string) $name;
-                    $out .= chr($childType) . pack("n", self::checkWriteStringLength(strlen($name))) . $name;
-                    if(!self::writeBody($child, $childType, $out)){
+                    $out .= chr($childType) . pack($this->short, self::checkWriteStringLength(strlen($name))) . $name;
+                    if(!$this->writeBody($child, $childType, $out)){
                         return false;
                     }
                 }
@@ -178,9 +194,11 @@ final class BigEndianNbtCodec{
     /**
      * Decodes the root tag of the given buffer (the root name is discarded, trailing data is ignored).
      *
+     * @param int $maxDepth maximum nesting depth of compound and list tags
+     *
      * @throws NbtDataException
      */
-    public static function decode(string $buffer) : Tag{
+    public function decode(string $buffer, int $maxDepth) : Tag{
         $length = strlen($buffer);
         $offset = 0;
 
@@ -190,8 +208,8 @@ final class BigEndianNbtCodec{
             throw new NbtDataException("Found TAG_End at the start of buffer");
         }
 
-        self::readString($buffer, $length, $offset); // root name
-        return self::readTag($type, $buffer, $length, $offset);
+        $this->readString($buffer, $length, $offset); // root name
+        return $this->readTag($type, $buffer, $length, $offset, $maxDepth);
     }
 
     /** @throws NbtDataException */
@@ -202,9 +220,9 @@ final class BigEndianNbtCodec{
     }
 
     /** @throws NbtDataException */
-    private static function readString(string $buffer, int $length, int &$offset) : string{
+    private function readString(string $buffer, int $length, int &$offset) : string{
         self::need($length, $offset, 2);
-        $stringLength = (ord($buffer[$offset]) << 8) | ord($buffer[$offset + 1]);
+        $stringLength = unpack($this->short, $buffer, $offset)[1];
         $offset += 2;
         if($stringLength > self::MAX_STRING_LENGTH){
             throw new NbtDataException("NBT string length too large ($stringLength > " . self::MAX_STRING_LENGTH . ")");
@@ -219,32 +237,35 @@ final class BigEndianNbtCodec{
     }
 
     /** @throws NbtDataException */
-    private static function readTag(int $type, string $buffer, int $length, int &$offset) : Tag{
+    private function readTag(int $type, string $buffer, int $length, int &$offset, int $depth) : Tag{
+        if(($type === self::TYPE_LIST || $type === self::TYPE_COMPOUND) && --$depth < 0){
+            throw new NbtDataException("Nesting depth limit exceeded");
+        }
         switch($type){
             case self::TYPE_BYTE:
                 self::need($length, $offset, 1);
                 return new ByteTag(ord($buffer[$offset++]) << 56 >> 56);
             case self::TYPE_SHORT:
                 self::need($length, $offset, 2);
-                $value = ((ord($buffer[$offset]) << 8) | ord($buffer[$offset + 1])) << 48 >> 48;
+                $value = unpack($this->short, $buffer, $offset)[1] << 48 >> 48;
                 $offset += 2;
                 return new ShortTag($value);
             case self::TYPE_INT:
-                return new IntTag(self::readInt($buffer, $length, $offset));
+                return new IntTag($this->readInt($buffer, $length, $offset));
             case self::TYPE_LONG:
                 self::need($length, $offset, 8);
                 $offset += 8;
-                return new LongTag(unpack("J", $buffer, $offset - 8)[1]);
+                return new LongTag(unpack($this->long, $buffer, $offset - 8)[1]);
             case self::TYPE_FLOAT:
                 self::need($length, $offset, 4);
                 $offset += 4;
-                return new FloatTag(unpack("G", $buffer, $offset - 4)[1]);
+                return new FloatTag(unpack($this->float, $buffer, $offset - 4)[1]);
             case self::TYPE_DOUBLE:
                 self::need($length, $offset, 8);
                 $offset += 8;
-                return new DoubleTag(unpack("E", $buffer, $offset - 8)[1]);
+                return new DoubleTag(unpack($this->double, $buffer, $offset - 8)[1]);
             case self::TYPE_BYTE_ARRAY:
-                $size = self::readInt($buffer, $length, $offset);
+                $size = $this->readInt($buffer, $length, $offset);
                 if($size < 0){
                     throw new NbtDataException("Array length cannot be less than zero ($size < 0)");
                 }
@@ -256,11 +277,11 @@ final class BigEndianNbtCodec{
                 $offset += $size;
                 return new ByteArrayTag(substr($buffer, $offset - $size, $size));
             case self::TYPE_STRING:
-                return new StringTag(self::readString($buffer, $length, $offset));
+                return new StringTag($this->readString($buffer, $length, $offset));
             case self::TYPE_LIST:
                 self::need($length, $offset, 1);
                 $childType = ord($buffer[$offset++]);
-                $size = self::readInt($buffer, $length, $offset);
+                $size = $this->readInt($buffer, $length, $offset);
 
                 $children = [];
                 if($size > 0){
@@ -268,7 +289,7 @@ final class BigEndianNbtCodec{
                         throw new NbtDataException("Unexpected non-empty list of TAG_End");
                     }
                     for($i = 0; $i < $size; ++$i){
-                        $children[] = self::readTag($childType, $buffer, $length, $offset);
+                        $children[] = $this->readTag($childType, $buffer, $length, $offset, $depth);
                     }
                 }
                 return new ListTag($children, $childType);
@@ -282,8 +303,8 @@ final class BigEndianNbtCodec{
                         return $result;
                     }
 
-                    $name = self::readString($buffer, $length, $offset);
-                    $child = self::readTag($childType, $buffer, $length, $offset);
+                    $name = $this->readString($buffer, $length, $offset);
+                    $child = $this->readTag($childType, $buffer, $length, $offset, $depth);
                     if(isset($names[$name])){
                         //duplicated names keep the first value, as pocketmine/nbt does
                         continue;
@@ -292,7 +313,7 @@ final class BigEndianNbtCodec{
                     $result->setTag($name, $child);
                 }
             case self::TYPE_INT_ARRAY:
-                $size = self::readInt($buffer, $length, $offset);
+                $size = $this->readInt($buffer, $length, $offset);
                 if($size < 0){
                     throw new NbtDataException("Array length cannot be less than zero ($size < 0)");
                 }
@@ -304,7 +325,7 @@ final class BigEndianNbtCodec{
                 self::need($length, $offset, $byteLength);
                 $offset += $byteLength;
                 $values = [];
-                foreach(unpack("N*", substr($buffer, $offset - $byteLength, $byteLength)) as $value){
+                foreach(unpack($this->int . "*", substr($buffer, $offset - $byteLength, $byteLength)) as $value){
                     $values[] = $value << 32 >> 32; // sign extension
                 }
                 return new IntArrayTag($values);
@@ -314,9 +335,9 @@ final class BigEndianNbtCodec{
     }
 
     /** @throws NbtDataException */
-    private static function readInt(string $buffer, int $length, int &$offset) : int{
+    private function readInt(string $buffer, int $length, int &$offset) : int{
         self::need($length, $offset, 4);
         $offset += 4;
-        return unpack("N", $buffer, $offset - 4)[1] << 32 >> 32;
+        return unpack($this->int, $buffer, $offset - 4)[1] << 32 >> 32;
     }
 }

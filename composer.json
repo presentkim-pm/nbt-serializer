@@ -5,6 +5,7 @@
   "license": "MIT",
   "require": {
     "php": "^8.4",
+    "ext-zlib": "*",
     "pocketmine/nbt": "^1.2"
   },
   "require-dev": {

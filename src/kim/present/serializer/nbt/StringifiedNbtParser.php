@@ -102,14 +102,15 @@ final class StringifiedNbtParser{
         "t"  => "\t",
     ];
 
-    /** Maximum nesting depth of compound and list tags (same as Minecraft) */
-    public const MAX_DEPTH = 512;
-
     private string $buffer;
     private int $offset = 0;
     private int $depth = 0;
 
-    public function __construct(string $buffer){
+    /** @param int $maxDepth maximum nesting depth of compound and list tags */
+    public function __construct(
+        string $buffer,
+        private readonly int $maxDepth = NbtSerializer::DEFAULT_MAX_DEPTH
+    ){
         $this->buffer = trim($buffer);
     }
 
@@ -179,8 +180,8 @@ final class StringifiedNbtParser{
     }
 
     private function enter() : void{
-        if(++$this->depth > self::MAX_DEPTH){
-            throw new SnbtDataException("nesting depth exceeds " . self::MAX_DEPTH, $this->offset - 1);
+        if(++$this->depth > $this->maxDepth){
+            throw new SnbtDataException("nesting depth exceeds {$this->maxDepth}", $this->offset - 1);
         }
     }
 

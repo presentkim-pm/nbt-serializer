@@ -26,7 +26,9 @@ declare(strict_types=1);
 
 namespace kim\present\serializer\nbt;
 
+use kim\present\serializer\nbt\exception\SnbtDataException;
 use pocketmine\nbt\BigEndianNbtSerializer;
+use pocketmine\nbt\LittleEndianNbtSerializer;
 use pocketmine\nbt\NbtDataException;
 use pocketmine\nbt\tag\ByteArrayTag;
 use pocketmine\nbt\tag\ByteTag;
@@ -47,13 +49,21 @@ use function base64_decode;
 use function base64_encode;
 use function bin2hex;
 use function chr;
-use function get_class;
-use function hex2bin;
 use function dechex;
+use function get_class;
+use function gzcompress;
+use function gzdecode;
+use function gzdeflate;
+use function gzencode;
+use function gzinflate;
+use function gzuncompress;
+use function hash;
+use function hex2bin;
 use function implode;
 use function is_finite;
 use function is_nan;
 use function json_encode;
+use function ksort;
 use function str_pad;
 use function str_repeat;
 use function strlen;
@@ -64,66 +74,222 @@ use function var_export;
 
 use const JSON_UNESCAPED_SLASHES;
 use const JSON_UNESCAPED_UNICODE;
+use const SORT_STRING;
 
 final class NbtSerializer{
 
     private const SAFE_KEY_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._+-";
 
-    private static ?BigEndianNbtSerializer $binarySerializer = null;
+    /** Default maximum nesting depth of compound and list tags while deserializing (same as Minecraft) */
+    public const DEFAULT_MAX_DEPTH = 512;
+
+    /** Default maximum size of the decompressed data (64 MiB) */
+    public const DEFAULT_MAX_DECOMPRESSED_LENGTH = 64 * 1024 * 1024;
 
     /** @var array<string, string>|null */
     private static ?array $escapeMap = null;
 
-    private static function binarySerializer() : BigEndianNbtSerializer{
-        return self::$binarySerializer ??= new BigEndianNbtSerializer();
+    private function __construct(){
+        //NOOP
     }
 
     /**
      * Serialize the nbt tag to binary string
      * Warning : There is a possibility of data corruption if used without any additional encoding.
      */
-    public static function toBinary(Tag $tag) : string{
-        return BigEndianNbtCodec::encode($tag) ?? self::binarySerializer()->write(new TreeRoot($tag));
+    public static function toBinary(Tag $tag, Endian $endian = Endian::BIG) : string{
+        return BinaryNbtCodec::get($endian)->encode($tag) ?? (
+            $endian === Endian::BIG ? new BigEndianNbtSerializer() : new LittleEndianNbtSerializer()
+        )->write(new TreeRoot($tag));
     }
 
     /**
      * Deserialize the nbt tag from binary string
      * Warning : There is a possibility of data corruption if used without any additional encoding.
+     *
+     * @throws NbtDataException
      */
-    public static function fromBinary(string $contents) : Tag{
-        return BigEndianNbtCodec::decode($contents);
+    public static function fromBinary(
+        string $contents,
+        Endian $endian = Endian::BIG,
+        int $maxDepth = self::DEFAULT_MAX_DEPTH
+    ) : Tag{
+        return BinaryNbtCodec::get($endian)->decode($contents, $maxDepth);
     }
 
     /** Serialize the nbt tag to base64 string (with binary string) */
-    public static function toBase64(Tag $tag) : string{
-        return base64_encode(self::toBinary($tag));
+    public static function toBase64(Tag $tag, Endian $endian = Endian::BIG) : string{
+        return base64_encode(self::toBinary($tag, $endian));
     }
 
-    /** Deserialize the nbt tag from base64 string (with binary string) */
-    public static function fromBase64(string $contents) : Tag{
+    /**
+     * Deserialize the nbt tag from base64 string (with binary string)
+     *
+     * @throws \InvalidArgumentException if the contents are not valid base64
+     * @throws NbtDataException
+     */
+    public static function fromBase64(
+        string $contents,
+        Endian $endian = Endian::BIG,
+        int $maxDepth = self::DEFAULT_MAX_DEPTH
+    ) : Tag{
         $decoded = base64_decode($contents, true);
         if($decoded === false){
             throw new \InvalidArgumentException('Invalid base64');
         }
-        return self::fromBinary($decoded);
+        return self::fromBinary($decoded, $endian, $maxDepth);
     }
 
     /** Serialize the nbt tag to hex string (with binary string) */
-    public static function toHex(Tag $tag) : string{
-        return bin2hex(self::toBinary($tag));
+    public static function toHex(Tag $tag, Endian $endian = Endian::BIG) : string{
+        return bin2hex(self::toBinary($tag, $endian));
     }
 
-    /** Deserialize the nbt tag from hex string (with binary string) */
-    public static function fromHex(string $contents) : Tag{
-        $decoded = hex2bin($contents);
-        if($decoded === false){
+    /**
+     * Deserialize the nbt tag from hex string (with binary string)
+     *
+     * @throws \InvalidArgumentException if the contents are not valid hex
+     * @throws NbtDataException
+     */
+    public static function fromHex(
+        string $contents,
+        Endian $endian = Endian::BIG,
+        int $maxDepth = self::DEFAULT_MAX_DEPTH
+    ) : Tag{
+        $length = strlen($contents);
+        if($length % 2 !== 0 || strspn($contents, "0123456789abcdefABCDEF") !== $length){
             throw new \InvalidArgumentException('Invalid hex');
         }
-        return self::fromBinary($decoded);
+        return self::fromBinary((string) hex2bin($contents), $endian, $maxDepth);
     }
 
-    /** Serialize the nbt tag to SNBT (stringified Named Binary Tag) */
-    public static function toSnbt(Tag $tag) : string{
+    /** Serialize the nbt tag to compressed binary string */
+    public static function toCompressed(
+        Tag $tag,
+        Compression $compression = Compression::GZIP,
+        Endian $endian = Endian::BIG,
+        int $level = -1
+    ) : string{
+        $binary = self::toBinary($tag, $endian);
+        $compressed = match ($compression) {
+            Compression::GZIP    => gzencode($binary, $level),
+            Compression::ZLIB    => gzcompress($binary, $level),
+            Compression::DEFLATE => gzdeflate($binary, $level),
+        };
+        if($compressed === false){
+            throw new \InvalidArgumentException("Failed to compress with level $level");
+        }
+        return $compressed;
+    }
+
+    /**
+     * Deserialize the nbt tag from compressed binary string
+     *
+     * @param int $maxLength maximum size of the decompressed data, to protect against decompression bombs
+     *
+     * @throws NbtDataException if the contents can not be decompressed or are not valid NBT
+     */
+    public static function fromCompressed(
+        string $contents,
+        Compression $compression = Compression::GZIP,
+        Endian $endian = Endian::BIG,
+        int $maxDepth = self::DEFAULT_MAX_DEPTH,
+        int $maxLength = self::DEFAULT_MAX_DECOMPRESSED_LENGTH
+    ) : Tag{
+        // the zlib functions emit a warning on failure, which PocketMine-MP turns into an exception
+        $decompressed = match ($compression) {
+            Compression::GZIP    => @gzdecode($contents, $maxLength),
+            Compression::ZLIB    => @gzuncompress($contents, $maxLength),
+            Compression::DEFLATE => @gzinflate($contents, $maxLength),
+        };
+        if($decompressed === false){
+            throw new NbtDataException("Failed to decompress the contents (corrupted, or larger than $maxLength bytes)");
+        }
+        return self::fromBinary($decompressed, $endian, $maxDepth);
+    }
+
+    /**
+     * Hash the nbt tag. Equal tags always have the same hash, regardless of the order of the compound entries.
+     *
+     * @param string $algo any algorithm supported by {@see hash()}
+     */
+    public static function hash(Tag $tag, string $algo = "xxh128") : string{
+        return hash($algo, self::toSnbt($tag, true));
+    }
+
+    /** Same as {@see fromBinary()}, but returns null instead of throwing for invalid contents */
+    public static function tryFromBinary(
+        string $contents,
+        Endian $endian = Endian::BIG,
+        int $maxDepth = self::DEFAULT_MAX_DEPTH
+    ) : ?Tag{
+        try{
+            return self::fromBinary($contents, $endian, $maxDepth);
+        }catch(NbtDataException){
+            return null;
+        }
+    }
+
+    /** Same as {@see fromBase64()}, but returns null instead of throwing for invalid contents */
+    public static function tryFromBase64(
+        string $contents,
+        Endian $endian = Endian::BIG,
+        int $maxDepth = self::DEFAULT_MAX_DEPTH
+    ) : ?Tag{
+        try{
+            return self::fromBase64($contents, $endian, $maxDepth);
+        }catch(NbtDataException | \InvalidArgumentException){
+            return null;
+        }
+    }
+
+    /** Same as {@see fromHex()}, but returns null instead of throwing for invalid contents */
+    public static function tryFromHex(
+        string $contents,
+        Endian $endian = Endian::BIG,
+        int $maxDepth = self::DEFAULT_MAX_DEPTH
+    ) : ?Tag{
+        try{
+            return self::fromHex($contents, $endian, $maxDepth);
+        }catch(NbtDataException | \InvalidArgumentException){
+            return null;
+        }
+    }
+
+    /** Same as {@see fromCompressed()}, but returns null instead of throwing for invalid contents */
+    public static function tryFromCompressed(
+        string $contents,
+        Compression $compression = Compression::GZIP,
+        Endian $endian = Endian::BIG,
+        int $maxDepth = self::DEFAULT_MAX_DEPTH,
+        int $maxLength = self::DEFAULT_MAX_DECOMPRESSED_LENGTH
+    ) : ?Tag{
+        try{
+            return self::fromCompressed($contents, $compression, $endian, $maxDepth, $maxLength);
+        }catch(NbtDataException){
+            return null;
+        }
+    }
+
+    /** Same as {@see fromSnbt()}, but returns null instead of throwing for invalid contents */
+    public static function tryFromSnbt(
+        string $contents,
+        int $maxDepth = self::DEFAULT_MAX_DEPTH,
+        ?int $maxLength = null
+    ) : ?Tag{
+        try{
+            return self::fromSnbt($contents, $maxDepth, $maxLength);
+        }catch(NbtDataException){
+            return null;
+        }
+    }
+
+    /**
+     * Serialize the nbt tag to SNBT (stringified Named Binary Tag)
+     *
+     * @param bool $sortKeys sort the compound entries by key, so that equal tags always produce the same string
+     */
+    public static function toSnbt(Tag $tag, bool $sortKeys = true) : string{
         switch(get_class($tag)){
             case ByteTag::class:
                 return $tag->getValue() . "b";
@@ -140,15 +306,19 @@ final class NbtSerializer{
             case StringTag::class:
                 return self::quoteString($tag->getValue());
             case CompoundTag::class:
+                $value = $tag->getValue();
+                if($sortKeys){
+                    ksort($value, SORT_STRING);
+                }
                 $parts = [];
-                foreach($tag->getValue() as $key => $child){
-                    $parts[] = self::encodeKey((string) $key) . ":" . self::toSnbt($child);
+                foreach($value as $key => $child){
+                    $parts[] = self::encodeKey((string) $key) . ":" . self::toSnbt($child, $sortKeys);
                 }
                 return "{" . implode(",", $parts) . "}";
             case ListTag::class:
                 $parts = [];
                 foreach($tag->getValue() as $child){
-                    $parts[] = self::toSnbt($child);
+                    $parts[] = self::toSnbt($child, $sortKeys);
                 }
                 return "[" . implode(",", $parts) . "]";
             case ByteArrayTag::class:
@@ -169,16 +339,19 @@ final class NbtSerializer{
     /**
      * Serialize the nbt tag to SNBT with spacing and indenting
      * Warning: The deeper the indenting, the more degraded the deserialize performance.
+     *
+     * @param bool $sortKeys sort the compound entries by key, so that equal tags always produce the same string
      */
     public static function toSnbtPretty(
         Tag $tag,
         int $indentLevel = 0,
         string $indentChar = "    ",
-        string $lineBreak = "\n"
+        string $lineBreak = "\n",
+        bool $sortKeys = true
     ) : string{
         $class = get_class($tag);
         if($class !== CompoundTag::class && $class !== ListTag::class){
-            return self::toSnbt($tag);
+            return self::toSnbt($tag, $sortKeys);
         }
 
         $value = $tag->getValue();
@@ -192,17 +365,20 @@ final class NbtSerializer{
         $next = $indentLevel + 1;
         $result = "";
         if($class === CompoundTag::class){
+            if($sortKeys){
+                ksort($value, SORT_STRING);
+            }
             foreach($value as $key => $child){
                 $result .= ($result === "" ? "{" . $innerTap : $separator)
                     . self::encodeKey((string) $key) . ": "
-                    . self::toSnbtPretty($child, $next, $indentChar, $lineBreak);
+                    . self::toSnbtPretty($child, $next, $indentChar, $lineBreak, $sortKeys);
             }
             return "$result$lineBreak$tap}";
         }
 
         foreach($value as $child){
             $result .= ($result === "" ? "[" . $innerTap : $separator)
-                . self::toSnbtPretty($child, $next, $indentChar, $lineBreak);
+                . self::toSnbtPretty($child, $next, $indentChar, $lineBreak, $sortKeys);
         }
         return "$result$lineBreak$tap]";
     }
@@ -263,10 +439,20 @@ final class NbtSerializer{
     /**
      * Deserialize the nbt tag from SNBT (stringified Named Binary Tag)
      *
+     * @param int      $maxDepth  maximum nesting depth of compound and list tags
+     * @param int|null $maxLength maximum length of the contents in bytes, null for no limit
+     *
      * @throws NbtDataException if the contents are not a single valid SNBT value
      */
-    public static function fromSnbt(string $contents) : Tag{
-        return (new StringifiedNbtParser($contents))->readRoot();
+    public static function fromSnbt(
+        string $contents,
+        int $maxDepth = self::DEFAULT_MAX_DEPTH,
+        ?int $maxLength = null
+    ) : Tag{
+        if($maxLength !== null && strlen($contents) > $maxLength){
+            throw new SnbtDataException("contents are longer than $maxLength bytes");
+        }
+        return (new StringifiedNbtParser($contents, $maxDepth))->readRoot();
     }
 
 }

@@ -42,31 +42,37 @@ Supports multiple serialization formats to fit various use cases, from human-rea
 
 ## 🚀 Serialization methods list
 
+> Every class is in the `kim\present\serializer\nbt` namespace.
+
 ### 1. StringifiedNBT Serialization
 The **nbt-serializer** library is optimized for working with SNBT, a human-readable format for NBT data. 
 
 #### Supported Functions
 ```php
-kim\present\serializer\nbt\NbtSerializer::toSnbt(Tag $tag) : string
-kim\present\serializer\nbt\NbtSerializer::fromSnbt(string $contents) : Tag
+NbtSerializer::toSnbt(Tag $tag, bool $sortKeys = true) : string
+NbtSerializer::toSnbtPretty(Tag $tag, int $indentLevel = 0, string $indentChar = "    ", string $lineBreak = "\n", bool $sortKeys = true) : string
+NbtSerializer::fromSnbt(string $contents, int $maxDepth = 512, ?int $maxLength = null) : Tag
+NbtSerializer::tryFromSnbt(string $contents, int $maxDepth = 512, ?int $maxLength = null) : ?Tag
 ```
+> Compound entries are sorted by key by default, so equal tags always produce the same string.
+> Pass `sortKeys: false` to keep the insertion order.
 
 #### Result example
 ```js
 {
     Count: 1b,
-    Slot: 12b,
-    Name: "minecraft:diamond_sword",
     Damage: 0s,
+    Name: "minecraft:diamond_sword",
+    Slot: 12b,
     tag: {
-        rarity: "legendary",
+        generatedBy: "GPT",
         itemType: "weapon",
+        rarity: "legendary",
         stats: {
             attackDamage: 20,
             criticalChance: 15f,
             skill: "Dragon’s Breath"
-        },
-        generatedBy: "GPT"
+        }
     }
 }
 ```
@@ -99,13 +105,16 @@ For more details, see [Official SNBT Documentation](https://minecraft.wiki/w/NBT
 ---
 
 ### 2. Binary Serialization
-Efficiently serialize NBT tags into a compact big endian binary format (byte-for-byte identical to `pocketmine\nbt\BigEndianNbtSerializer`).
+Efficiently serialize NBT tags into a compact binary format, byte-for-byte identical to
+`pocketmine\nbt\BigEndianNbtSerializer` (default, Java Edition files) or `LittleEndianNbtSerializer` (`Endian::LITTLE`, Bedrock Edition files).
 
 #### Supported Functions
 ```php
-kim\present\serializer\nbt\NbtSerializer::toBinary(Tag $tag) : string
-kim\present\serializer\nbt\NbtSerializer::fromBinary(string $contents) : Tag
+NbtSerializer::toBinary(Tag $tag, Endian $endian = Endian::BIG) : string
+NbtSerializer::fromBinary(string $contents, Endian $endian = Endian::BIG, int $maxDepth = 512) : Tag
+NbtSerializer::tryFromBinary(string $contents, Endian $endian = Endian::BIG, int $maxDepth = 512) : ?Tag
 ```
+> Unlike pocketmine/nbt, negative values of `TAG_Int_Array` are decoded with their sign.
 
 #### Result example
 > It contains values that cannot be expressed in text, so provides Unicode Escaped content.
@@ -127,8 +136,9 @@ Base64 encoding allows binary data to be represented in text format, making it s
 
 #### Supported Functions
 ```php
-kim\present\serializer\nbt\NbtSerializer::toBase64(Tag $tag) : string
-kim\present\serializer\nbt\NbtSerializer::fromBase64(string $contents) : Tag
+NbtSerializer::toBase64(Tag $tag, Endian $endian = Endian::BIG) : string
+NbtSerializer::fromBase64(string $contents, Endian $endian = Endian::BIG, int $maxDepth = 512) : Tag
+NbtSerializer::tryFromBase64(string $contents, Endian $endian = Endian::BIG, int $maxDepth = 512) : ?Tag
 ```
 
 #### Result example
@@ -147,8 +157,9 @@ Hexadecimal encoding provides an alternative way to convert binary data into a h
 
 #### Supported Functions
 ```php
-kim\present\serializer\nbt\NbtSerializer::toHex(Tag $tag) : string
-kim\present\serializer\nbt\NbtSerializer::fromHex(string $contents) : Tag
+NbtSerializer::toHex(Tag $tag, Endian $endian = Endian::BIG) : string
+NbtSerializer::fromHex(string $contents, Endian $endian = Endian::BIG, int $maxDepth = 512) : Tag
+NbtSerializer::tryFromHex(string $contents, Endian $endian = Endian::BIG, int $maxDepth = 512) : ?Tag
 ```
 
 #### Result example
@@ -159,6 +170,77 @@ kim\present\serializer\nbt\NbtSerializer::fromHex(string $contents) : Tag
 #### Use Cases
 - Debugging binary NBT data with an easily visualized format.
 - Transmitting NBT data through mediums that support only alphanumeric characters.
+
+---
+
+### 5. Compressed Binary Serialization
+Compress the binary format with gzip (default, the format of Java Edition `.nbt` / `.dat` files), zlib or raw deflate.
+NBT repeats the same key names a lot, so it is usually several times smaller.
+
+#### Supported Functions
+```php
+NbtSerializer::toCompressed(Tag $tag, Compression $compression = Compression::GZIP, Endian $endian = Endian::BIG, int $level = -1) : string
+NbtSerializer::fromCompressed(string $contents, Compression $compression = Compression::GZIP, Endian $endian = Endian::BIG, int $maxDepth = 512, int $maxLength = 64 MiB) : Tag
+NbtSerializer::tryFromCompressed(/* same as fromCompressed */) : ?Tag
+```
+> `$maxLength` limits the size of the decompressed data, to protect against decompression bombs.  
+> Combine with `base64_encode()` to store it in text-based storage.
+
+---
+
+## 🧰 Utilities
+
+### Deserializing untrusted input
+Every `from*()` method has a `tryFrom*()` variant returning `null` instead of throwing,
+and accepts `$maxDepth` (nesting depth of compound and list tags, 512 by default) to reject maliciously deep data.
+```php
+$tag = NbtSerializer::tryFromSnbt($userInput, maxDepth: 32, maxLength: 4096);
+if($tag === null){
+    // invalid input
+}
+```
+
+### Hashing
+```php
+NbtSerializer::hash(Tag $tag, string $algo = "xxh128") : string
+```
+Equal tags always have the same hash, regardless of the order of the compound entries.
+Useful for deduplication, cache keys and comparing items.
+
+### NBT path
+Read and modify a tag deep in the tree with a path like the Minecraft NBT path.
+```php
+use kim\present\serializer\nbt\NbtPath;
+
+$path = NbtPath::parse('tag.display.Lore[0]');  // parsed paths are cached
+$path->get($tag);                                 // ?Tag
+$path->has($tag);                                 // bool
+$path->set($tag, new StringTag("First line"));    // missing compounds are created
+$path->remove($tag);                              // bool, whether it existed
+
+NbtPath::parse('tag."key with.dot"[-1]');         // quoted keys, negative index from the end
+(string) NbtPath::of("tag", "a.b", 0);            // 'tag."a.b"[0]'
+```
+- `key` / `"key"` / `'key'` : entry of a compound tag
+- `[index]` : entry of a list tag (byte / int arrays can be read too), `[-1]` is the last entry
+- an empty path is the root tag itself
+- an invalid path, or a `set()` that can not be applied, throws `NbtPathException`
+
+### Merge and diff
+```php
+use kim\present\serializer\nbt\NbtTree;
+
+// deep merge like the `/data merge` command, neither of the arguments is modified
+$merged = NbtTree::merge($base, $patch);
+
+// differences between two trees
+foreach(NbtTree::diff($old, $new) as $change){
+    echo $change->path, " : ", $change->isAdded() ? "added" : ($change->isRemoved() ? "removed" : "modified"), "\n";
+}
+
+// apply the differences to another tree
+NbtTree::apply($target, NbtTree::diff($old, $new));
+```
 
 ---
 
