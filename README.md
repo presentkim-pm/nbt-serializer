@@ -83,7 +83,7 @@ For more details, see [Official SNBT Documentation](https://minecraft.wiki/w/NBT
 
 #### Format notes
 - `fromSnbt()` throws `pocketmine\nbt\NbtDataException` (or its subclasses) for every invalid input,
-  including out of range numbers, mixed list entry types and trailing data after the value.
+  including out of range numbers, mixed list entry types, nesting deeper than 512 and trailing data after the value.
 - Floating point values are written without precision loss (e.g. `0.30000000000000004d`),
   and non-finite values are written as `NaN`, `Infinity` and `-Infinity` with the `f` / `d` suffix.
 - Strings are quoted with `"` and only quotes, backslashes and control characters are escaped,

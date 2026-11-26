@@ -102,8 +102,12 @@ final class StringifiedNbtParser{
         "t"  => "\t",
     ];
 
+    /** Maximum nesting depth of compound and list tags (same as Minecraft) */
+    public const MAX_DEPTH = 512;
+
     private string $buffer;
     private int $offset = 0;
+    private int $depth = 0;
 
     public function __construct(string $buffer){
         $this->buffer = trim($buffer);
@@ -151,7 +155,10 @@ final class StringifiedNbtParser{
         }
 
         if($c === "{"){ // start of compound tag
-            return $this->readCompoundTag();
+            $this->enter();
+            $tag = $this->readCompoundTag();
+            $this->depth--;
+            return $tag;
         }
 
         // start of collection
@@ -165,7 +172,16 @@ final class StringifiedNbtParser{
                 return $this->readIntArrayTag();
             }
         }
-        return $this->readListTag();
+        $this->enter();
+        $tag = $this->readListTag();
+        $this->depth--;
+        return $tag;
+    }
+
+    private function enter() : void{
+        if(++$this->depth > self::MAX_DEPTH){
+            throw new SnbtDataException("nesting depth exceeds " . self::MAX_DEPTH, $this->offset - 1);
+        }
     }
 
     /** Parse the unquoted value (number with optional type suffix, or plain string) */
@@ -279,10 +295,11 @@ final class StringifiedNbtParser{
         $result = [];
         foreach($this->readArrayEntries('/^([+-]?\d+)$/', "integer entries") as $entry){
             $value = +$entry;
-            if(!is_int($value) || $value < -0x80000000 || $value > 0x7fffffff){
+            // unsigned values (0 ~ 0xffffffff) are accepted for the arrays decoded as unsigned by pocketmine/nbt
+            if(!is_int($value) || $value < -0x80000000 || $value > 0xffffffff){
                 throw new SnbtDataException("integer '$entry' is out of range", $offset);
             }
-            $result[] = $value;
+            $result[] = $value << 32 >> 32;
         }
         return new IntArrayTag($result);
     }

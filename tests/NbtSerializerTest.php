@@ -107,6 +107,22 @@ final class NbtSerializerTest extends TestCase{
         self::assertTrue(NbtSerializer::fromSnbt($expected)->equals($tag));
     }
 
+    private static function nestedList(int $depth) : ListTag{
+        $tag = new ListTag();
+        for($i = 1; $i < $depth; ++$i){
+            $tag = new ListTag([$tag]);
+        }
+        return $tag;
+    }
+
+    public function testUnsignedIntArrayFromPocketmineRoundTrip() : void{
+        // pocketmine/nbt decodes negative TAG_Int_Array values as unsigned
+        $tag = (new BigEndianNbtSerializer())->read((new BigEndianNbtSerializer())->write(new TreeRoot(new IntArrayTag([-1, 5]))))->getTag();
+        $snbt = NbtSerializer::toSnbt($tag);
+        self::assertSame("[I;-1,5]", $snbt);
+        self::assertTrue(NbtSerializer::fromSnbt($snbt)->equals(new IntArrayTag([-1, 5])));
+    }
+
     public function testNaNRoundTrip() : void{
         self::assertSame("NaNd", NbtSerializer::toSnbt(new DoubleTag(NAN)));
         $tag = NbtSerializer::fromSnbt("NaNf");
@@ -124,6 +140,8 @@ final class NbtSerializerTest extends TestCase{
             "decimal byte is text"  => ["1.5b", new StringTag("1.5b")],
             "upper byte suffix"     => ["[B;1B,2b]", new ByteArrayTag("\x01\x02")],
             "unsigned bytes"        => ["[B;255b]", new ByteArrayTag("\xff")],
+            "unsigned ints"         => ["[I;4294967295]", new IntArrayTag([-1])],
+            "max depth"             => [str_repeat("[", 512) . str_repeat("]", 512), self::nestedList(512)],
             "int array trailing"    => ["[I;1,-2,]", new IntArrayTag([1, -2])],
             "empty arrays"          => ["[[B;],[B; ]]", new ListTag([new ByteArrayTag(""), new ByteArrayTag("")])],
             "space before colon"    => ['{"a"  :1}', CompoundTag::create()->setInt("a", 1)],
@@ -149,6 +167,9 @@ final class NbtSerializerTest extends TestCase{
             "trailing data"         => ["{a:1} trailing"],
             "int array overflow"    => ["[I;99999999999]"],
             "byte array overflow"   => ["[B;256b]"],
+            "int array overflow 2"  => ["[I;4294967296]"],
+            "too deep list"         => [str_repeat("[", 100000)],
+            "too deep compound"     => [str_repeat("{a:", 1000) . "1" . str_repeat("}", 1000)],
             "byte array no suffix"  => ["[B;1]"],
             "empty value"           => ["{a:}"],
             "unclosed string"       => ['"abc'],

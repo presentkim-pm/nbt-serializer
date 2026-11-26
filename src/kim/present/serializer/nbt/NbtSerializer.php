@@ -42,6 +42,7 @@ use pocketmine\nbt\tag\StringTag;
 use pocketmine\nbt\tag\Tag;
 use pocketmine\nbt\TreeRoot;
 
+use function array_map;
 use function base64_decode;
 use function base64_encode;
 use function bin2hex;
@@ -159,7 +160,7 @@ final class NbtSerializer{
                 $value = $tag->getValue();
                 return $value === []
                     ? "[I;]"
-                    : "[I;" . implode(",", $value) . "]";
+                    : "[I;" . implode(",", array_map(self::signInt(...), $value)) . "]";
             default:
                 throw new \InvalidArgumentException("Unknown tag type " . get_class($tag));
         }
@@ -206,7 +207,12 @@ final class NbtSerializer{
         return "$result$lineBreak$tap]";
     }
 
-    /** Quote the compound key only when it is empty or contains characters outside of [a-zA-Z0-9._+-] */
+    /** Normalize the unsigned 32-bit values (as decoded by pocketmine/nbt) to signed */
+    private static function signInt(int $value) : int{
+        return $value << 32 >> 32;
+    }
+
+        /** Quote the compound key only when it is empty or contains characters outside of [a-zA-Z0-9._+-] */
     private static function encodeKey(string $key) : string{
         return $key !== "" && strspn($key, self::SAFE_KEY_CHARS) === strlen($key) ? $key : self::quoteString($key);
     }
