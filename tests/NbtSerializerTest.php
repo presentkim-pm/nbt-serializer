@@ -89,7 +89,7 @@ final class NbtSerializerTest extends TestCase{
     public static function snbtOutputProvider() : array{
         return [
             "double precision"   => [new DoubleTag(0.1 + 0.2), "0.30000000000000004d"],
-            "integral double"    => [new DoubleTag(3.0), "3.0d"],
+            "integral double"    => [new DoubleTag(3.0), "3d"],
             "float infinity"     => [new FloatTag(INF), "Infinityf"],
             "double -infinity"   => [new DoubleTag(-INF), "-Infinityd"],
             "trailing backslash" => [new StringTag("a\\"), '"a\\\\"'],

@@ -52,21 +52,21 @@ use function dechex;
 use function implode;
 use function is_finite;
 use function is_nan;
+use function json_encode;
 use function str_pad;
 use function str_repeat;
 use function strlen;
-use function strcspn;
 use function strspn;
 use function strtr;
 use function unpack;
 use function var_export;
 
+use const JSON_UNESCAPED_SLASHES;
+use const JSON_UNESCAPED_UNICODE;
+
 final class NbtSerializer{
 
     private const SAFE_KEY_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._+-";
-
-    /** Characters that must be escaped in quoted strings : quotes, backslashes and control characters */
-    private const ESCAPE_CHARS = "\"\\\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f\x7f";
 
     private static ?BigEndianNbtSerializer $binarySerializer = null;
 
@@ -216,6 +216,11 @@ final class NbtSerializer{
      * Non-finite values are written as NaN, Infinity and -Infinity.
      */
     private static function encodeFloat(float $value) : string{
+        // fast path : the short representation (precision ini, 14 digits by default) when it is lossless
+        $short = (string) $value;
+        if((float) $short === $value){
+            return $short;
+        }
         if(is_finite($value)){
             return var_export($value, true);
         }
@@ -227,8 +232,10 @@ final class NbtSerializer{
      * Other bytes are written as-is, so strings that are not valid UTF-8 are preserved too.
      */
     private static function quoteString(string $value) : string{
-        if(strcspn($value, self::ESCAPE_CHARS) === strlen($value)){
-            return '"' . $value . '"';
+        // fast path : json_encode() does the same escaping for valid UTF-8 strings
+        $json = json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if($json !== false){
+            return $json;
         }
         return '"' . strtr($value, self::$escapeMap ??= self::buildEscapeMap()) . '"';
     }

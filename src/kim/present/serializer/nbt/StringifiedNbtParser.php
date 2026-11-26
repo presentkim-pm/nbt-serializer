@@ -54,6 +54,7 @@ use function preg_match;
 use function preg_replace_callback;
 use function strcspn;
 use function strlen;
+use function strpbrk;
 use function strpos;
 use function strspn;
 use function strtoupper;
@@ -177,42 +178,35 @@ final class StringifiedNbtParser{
             return $suffix === "f" ? new FloatTag($float) : new DoubleTag($float);
         }
 
-        if(!is_numeric($number) || ($suffix !== null && $number[-1] <= " ")){
+        if(!is_numeric($number)){
             return new StringTag($value);
         }
 
-        $sign = $number[0] === "-" || $number[0] === "+" ? 1 : 0;
-        $isInteger = strspn($number, "0123456789", $sign) === strlen($number) - $sign;
         try{
-            switch($suffix){
-                case "f":
-                    return new FloatTag((float) $number);
-                case "d":
-                    return new DoubleTag((float) $number);
-                case null:
-                    return $isInteger ? new IntTag(self::toInt($number, $offset)) : new DoubleTag((float) $number);
-                default: // b, s, l
-                    if(!$isInteger){
-                        return new StringTag($value);
-                    }
-                    $int = self::toInt($number, $offset);
-                    return match ($suffix) {
-                        "b" => new ByteTag($int),
-                        "s" => new ShortTag($int),
-                        "l" => new LongTag($int)
-                    };
+            if($suffix === "f"){
+                return new FloatTag((float) $number);
             }
+            if($suffix === "d"){
+                return new DoubleTag((float) $number);
+            }
+
+            if(strpbrk($number, ".eE") !== false){ // not an integer
+                return $suffix === null ? new DoubleTag((float) $number) : new StringTag($value);
+            }
+
+            $int = isset($number[18]) ? +$number : (int) $number; // up to 18 characters always fit in 64-bit
+            if(!is_int($int)){
+                throw new SnbtDataException("integer '$number' is out of 64-bit range", $offset);
+            }
+            return match ($suffix) {
+                null => new IntTag($int),
+                "b"  => new ByteTag($int),
+                "s"  => new ShortTag($int),
+                "l"  => new LongTag($int)
+            };
         }catch(InvalidTagValueException $e){
             throw new SnbtDataException($e->getMessage(), $offset);
         }
-    }
-
-    private static function toInt(string $number, int $offset) : int{
-        $int = +$number;
-        if(!is_int($int)){
-            throw new SnbtDataException("integer '$number' is out of 64-bit range", $offset);
-        }
-        return $int;
     }
 
     private function readListTag() : ListTag{

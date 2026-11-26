@@ -63,7 +63,7 @@ kim\present\serializer\nbt\NbtSerializer::fromSnbt(string $contents) : Tag
         itemType: "weapon",
         stats: {
             attackDamage: 20,
-            criticalChance: 15.0f,
+            criticalChance: 15f,
             skill: "Dragon’s Breath"
         },
         generatedBy: "GPT"

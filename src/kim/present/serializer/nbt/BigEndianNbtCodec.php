@@ -40,7 +40,6 @@ use pocketmine\nbt\tag\ShortTag;
 use pocketmine\nbt\tag\StringTag;
 use pocketmine\nbt\tag\Tag;
 
-use function array_values;
 use function chr;
 use function count;
 use function get_class;
@@ -53,6 +52,9 @@ use function unpack;
 /**
  * Big endian NBT codec producing and accepting exactly the same bytes (and failing with the same exceptions)
  * as {@see \pocketmine\nbt\BigEndianNbtSerializer}, without its per-value stream and closure overhead.
+ *
+ * The only intended difference : negative values of TAG_Int_Array are decoded with their sign,
+ * while pocketmine/nbt decodes them as unsigned 32-bit values.
  *
  * @internal
  */
@@ -301,7 +303,11 @@ final class BigEndianNbtCodec{
                 $byteLength = $size * 4;
                 self::need($length, $offset, $byteLength);
                 $offset += $byteLength;
-                return new IntArrayTag(array_values(unpack("N*", substr($buffer, $offset - $byteLength, $byteLength))));
+                $values = [];
+                foreach(unpack("N*", substr($buffer, $offset - $byteLength, $byteLength)) as $value){
+                    $values[] = $value << 32 >> 32; // sign extension
+                }
+                return new IntArrayTag($values);
             default:
                 throw new NbtDataException("Unknown NBT tag type $type");
         }
