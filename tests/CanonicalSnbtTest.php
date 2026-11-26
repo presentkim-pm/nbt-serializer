@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace kim\present\serializer\nbt\tests;
 
 use kim\present\serializer\nbt\NbtSerializer;
+use kim\present\serializer\nbt\StringifiedNbtParser;
 use PHPUnit\Framework\TestCase;
 use pocketmine\nbt\tag\CompoundTag;
+use pocketmine\nbt\tag\DoubleTag;
+use pocketmine\nbt\tag\FloatTag;
 use pocketmine\nbt\tag\ListTag;
 
 final class CanonicalSnbtTest extends TestCase{
@@ -31,6 +34,28 @@ final class CanonicalSnbtTest extends TestCase{
         $tag = CompoundTag::create()->setInt("10", 1)->setInt("9", 2)->setInt("a", 3);
         self::assertSame('{10:1,9:2,a:3}', NbtSerializer::toSnbt($tag));
         self::assertTrue(NbtSerializer::fromSnbt(NbtSerializer::toSnbt($tag))->equals($tag));
+    }
+
+    public function testHashOfSignedZero() : void{
+        // FloatTag compares the 32-bit representation : -0.0 differs, but the extra 64-bit precision is ignored
+        self::assertFalse((new FloatTag(0.0))->equals(new FloatTag(-0.0)));
+        self::assertNotSame(NbtSerializer::hash(new FloatTag(0.0)), NbtSerializer::hash(new FloatTag(-0.0)));
+        $float32 = new FloatTag(unpack("G", pack("G", 0.1))[1]);
+        self::assertTrue((new FloatTag(0.1))->equals($float32));
+        self::assertSame(NbtSerializer::hash(new FloatTag(0.1)), NbtSerializer::hash($float32));
+
+        // DoubleTag compares with === : -0.0 equals 0.0
+        self::assertTrue((new DoubleTag(0.0))->equals(new DoubleTag(-0.0)));
+        self::assertSame(
+            NbtSerializer::hash(CompoundTag::create()->setDouble("d", 0.0)),
+            NbtSerializer::hash(CompoundTag::create()->setDouble("d", -0.0))
+        );
+        // the SNBT itself keeps the sign
+        self::assertSame("-0d", NbtSerializer::toSnbt(new DoubleTag(-0.0)));
+    }
+
+    public function testDeprecatedMaxDepthAlias() : void{
+        self::assertSame(NbtSerializer::DEFAULT_MAX_DEPTH, StringifiedNbtParser::MAX_DEPTH);
     }
 
     public function testHashDiffersForDifferentTags() : void{

@@ -102,6 +102,9 @@ final class StringifiedNbtParser{
         "t"  => "\t",
     ];
 
+    /** @deprecated use {@see NbtSerializer::DEFAULT_MAX_DEPTH} */
+    public const MAX_DEPTH = NbtSerializer::DEFAULT_MAX_DEPTH;
+
     private string $buffer;
     private int $offset = 0;
     private int $depth = 0;

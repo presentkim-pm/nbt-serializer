@@ -70,6 +70,7 @@ use function strlen;
 use function strspn;
 use function strtr;
 use function unpack;
+use function pack;
 use function var_export;
 
 use const JSON_UNESCAPED_SLASHES;
@@ -187,6 +188,7 @@ final class NbtSerializer{
      *
      * @param int $maxLength maximum size of the decompressed data, to protect against decompression bombs
      *
+     * @throws \InvalidArgumentException if the maxLength is less than 1
      * @throws NbtDataException if the contents can not be decompressed or are not valid NBT
      */
     public static function fromCompressed(
@@ -196,6 +198,9 @@ final class NbtSerializer{
         int $maxDepth = self::DEFAULT_MAX_DEPTH,
         int $maxLength = self::DEFAULT_MAX_DECOMPRESSED_LENGTH
     ) : Tag{
+        if($maxLength < 1){ // the zlib functions treat 0 as "no limit"
+            throw new \InvalidArgumentException("maxLength must be at least 1, $maxLength given");
+        }
         // the zlib functions emit a warning on failure, which PocketMine-MP turns into an exception
         $decompressed = match ($compression) {
             Compression::GZIP    => @gzdecode($contents, $maxLength),
@@ -214,7 +219,7 @@ final class NbtSerializer{
      * @param string $algo any algorithm supported by {@see hash()}
      */
     public static function hash(Tag $tag, string $algo = "xxh128") : string{
-        return hash($algo, self::toSnbt($tag, true));
+        return hash($algo, self::writeSnbt($tag, true, true));
     }
 
     /** Same as {@see fromBinary()}, but returns null instead of throwing for invalid contents */
@@ -290,6 +295,11 @@ final class NbtSerializer{
      * @param bool $sortKeys sort the compound entries by key, so that equal tags always produce the same string
      */
     public static function toSnbt(Tag $tag, bool $sortKeys = true) : string{
+        return self::writeSnbt($tag, $sortKeys, false);
+    }
+
+    /** @param bool $canonical write the same string for all tags that are equal by {@see Tag::equals()} */
+    private static function writeSnbt(Tag $tag, bool $sortKeys, bool $canonical) : string{
         switch(get_class($tag)){
             case ByteTag::class:
                 return $tag->getValue() . "b";
@@ -300,9 +310,11 @@ final class NbtSerializer{
             case LongTag::class:
                 return $tag->getValue() . "l";
             case FloatTag::class:
-                return self::encodeFloat($tag->getValue()) . "f";
+                // FloatTag::equals() compares the 32-bit representation
+                return self::encodeFloat($canonical ? unpack("G", pack("G", $tag->getValue()))[1] : $tag->getValue()) . "f";
             case DoubleTag::class:
-                return self::encodeFloat($tag->getValue()) . "d";
+                // DoubleTag::equals() uses ===, which treats -0.0 and 0.0 as equal
+                return self::encodeFloat($canonical ? $tag->getValue() + 0.0 : $tag->getValue()) . "d";
             case StringTag::class:
                 return self::quoteString($tag->getValue());
             case CompoundTag::class:
@@ -312,13 +324,13 @@ final class NbtSerializer{
                 }
                 $parts = [];
                 foreach($value as $key => $child){
-                    $parts[] = self::encodeKey((string) $key) . ":" . self::toSnbt($child, $sortKeys);
+                    $parts[] = self::encodeKey((string) $key) . ":" . self::writeSnbt($child, $sortKeys, $canonical);
                 }
                 return "{" . implode(",", $parts) . "}";
             case ListTag::class:
                 $parts = [];
                 foreach($tag->getValue() as $child){
-                    $parts[] = self::toSnbt($child, $sortKeys);
+                    $parts[] = self::writeSnbt($child, $sortKeys, $canonical);
                 }
                 return "[" . implode(",", $parts) . "]";
             case ByteArrayTag::class:

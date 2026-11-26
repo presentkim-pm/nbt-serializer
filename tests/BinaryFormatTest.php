@@ -87,6 +87,18 @@ final class BinaryFormatTest extends TestCase{
         self::assertNull(NbtSerializer::tryFromCompressed($compressed, maxLength: 1024));
     }
 
+    public function testInvalidMaxLengthIsRejected() : void{
+        $compressed = NbtSerializer::toCompressed(self::sample());
+        foreach([0, -1] as $maxLength){
+            try{
+                NbtSerializer::tryFromCompressed($compressed, maxLength: $maxLength);
+                self::fail("maxLength $maxLength must be rejected");
+            }catch(\InvalidArgumentException){
+            }
+        }
+        self::assertNotNull(NbtSerializer::tryFromCompressed($compressed));
+    }
+
     public function testBinaryDepthLimit() : void{
         $tag = new ListTag();
         for($i = 1; $i < 20; ++$i){

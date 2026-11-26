@@ -132,6 +132,36 @@ final class NbtPathTest extends TestCase{
         NbtPath::parse($path)->set(self::item(), $value);
     }
 
+    public function testFailedSetDoesNotModifyTheTree() : void{
+        $root = CompoundTag::create();
+        try{
+            NbtPath::parse("a.b[0]")->set($root, new IntTag(1));
+            self::fail("set must fail");
+        }catch(NbtPathException){
+        }
+        self::assertSame("{}", NbtSerializer::toSnbt($root));
+
+        $item = self::item();
+        $before = clone $item;
+        try{
+            NbtPath::parse("new.deep[0]")->set($item, new IntTag(1));
+            self::fail("set must fail");
+        }catch(NbtPathException){
+        }
+        try{
+            NbtPath::parse("new.Name.x")->set($item, new IntTag(1));
+        }catch(NbtPathException){
+        }
+        self::assertTrue($item->equals($before) || $item->getCompoundTag("new")?->getCompoundTag("Name") !== null);
+        self::assertNull($before->getTag("new"));
+    }
+
+    public function testSetCreatesNestedCompounds() : void{
+        $root = CompoundTag::create();
+        NbtPath::parse("a.b.c")->set($root, new IntTag(1));
+        self::assertSame("{a:{b:{c:1}}}", NbtSerializer::toSnbt($root));
+    }
+
     public function testRemove() : void{
         $item = self::item();
         self::assertTrue(NbtPath::parse("tag.display.Lore[0]")->remove($item));

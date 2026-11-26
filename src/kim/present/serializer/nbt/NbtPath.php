@@ -187,7 +187,11 @@ final class NbtPath implements \Stringable{
             throw new NbtPathException("Can not set the root tag");
         }
 
+        // missing compound tags are created detached, and attached only after the final write succeeded
         $parent = $root;
+        $attachTo = null;
+        $attachKey = "";
+        $detached = null;
         for($i = 0; $i < $last; ++$i){
             $segment = $this->segments[$i];
             $child = self::child($parent, $segment);
@@ -196,12 +200,24 @@ final class NbtPath implements \Stringable{
                     throw new NbtPathException("Tag at '" . self::format($this->segments, $i + 1) . "' does not exist");
                 }
                 $child = CompoundTag::create();
-                $parent->setTag($segment, $child);
+                if($detached === null){
+                    $attachTo = $parent;
+                    $attachKey = $segment;
+                    $detached = $child;
+                }else{
+                    $parent->setTag($segment, $child);
+                }
             }
             $parent = $child;
         }
 
-        $segment = $this->segments[$last];
+        $this->setChild($parent, $this->segments[$last], $value);
+        if($attachTo !== null && $detached !== null){
+            $attachTo->setTag($attachKey, $detached);
+        }
+    }
+
+    private function setChild(Tag $parent, string|int $segment, Tag $value) : void{
         if($parent instanceof CompoundTag && !is_int($segment)){
             $parent->setTag($segment, $value);
             return;
