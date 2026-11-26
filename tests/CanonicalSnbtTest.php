@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace kim\present\serializer\nbt\tests;
 
 use kim\present\serializer\nbt\NbtSerializer;
-use kim\present\serializer\nbt\StringifiedNbtParser;
 use PHPUnit\Framework\TestCase;
 use pocketmine\nbt\tag\CompoundTag;
 use pocketmine\nbt\tag\DoubleTag;
@@ -52,10 +51,6 @@ final class CanonicalSnbtTest extends TestCase{
         );
         // the SNBT itself keeps the sign
         self::assertSame("-0d", NbtSerializer::toSnbt(new DoubleTag(-0.0)));
-    }
-
-    public function testDeprecatedMaxDepthAlias() : void{
-        self::assertSame(NbtSerializer::DEFAULT_MAX_DEPTH, StringifiedNbtParser::MAX_DEPTH);
     }
 
     public function testHashDiffersForDifferentTags() : void{
