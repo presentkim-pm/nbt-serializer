@@ -26,7 +26,7 @@ final class CanonicalSnbtTest extends TestCase{
     public function testInsertionOrderCanBeKept() : void{
         $tag = CompoundTag::create()->setInt("b", 1)->setInt("a", 2);
         self::assertSame("{b:1,a:2}", NbtSerializer::toSnbt($tag, false));
-        self::assertSame("{\n    b: 1, \n    a: 2\n}", NbtSerializer::toSnbtPretty($tag, sortKeys: false));
+        self::assertSame("{\n    b: 1,\n    a: 2\n}", NbtSerializer::toSnbtPretty($tag, sortKeys: false));
     }
 
     public function testNumericKeysAreSortedAsStrings() : void{

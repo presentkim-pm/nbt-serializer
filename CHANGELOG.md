@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### 🐛 Fixes
+- `toSnbtPretty()` no longer writes a trailing space at the end of each line.
+
+### 📝 Documentation
+- Rewrote the README : highlights, use cases, format comparison, usage of every API and exceptions.
+
 ## 3.0.0 (2026-11-27)
 
 The original [pmmp/PocketMine-MP](https://github.com/pmmp/PocketMine-MP) 5.x (Poggit virion) version is kept on the

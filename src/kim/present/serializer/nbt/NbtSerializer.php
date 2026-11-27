@@ -440,7 +440,7 @@ final class NbtSerializer{
 
         $tap = str_repeat($indentChar, $indentLevel);
         $innerTap = "$lineBreak$tap$indentChar";
-        $separator = ", $innerTap";
+        $separator = ",$innerTap";
         $next = $indentLevel + 1;
         $result = "";
         if($class === CompoundTag::class){

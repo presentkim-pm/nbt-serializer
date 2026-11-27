@@ -5,7 +5,6 @@
 [![Downloads][downloads-badge]][packagist-url]
 [![CI][ci-badge]][ci-url]
 [![PHP][php-badge]][php-url]
-[![Stars][stars-badge]][stars-url]
 [![License][license-badge]][license-url]
 
 </div>
@@ -16,50 +15,123 @@
   <img src="https://raw.githubusercontent.com/presentkim-pm/nbt-serializer/main/assets/icon.png" alt="Logo" width="80" height="80"/>
   <h3>nbt-serializer</h3>
   <p align="center">
-    A powerful library that makes (de)serializing NBT shorter, faster, and easier!
+    Turn any NBT tag into a string and back, in one line.<br/>
+    Fast, safe and well tested, for <a href="https://github.com/axolotl-pm/PocketMine-MP">axolotl-pm/PocketMine-MP</a>.
 
-[View on Packagist][packagist-url] · [View on GitHub][repo-url] · [Report a bug][issues-url] · [Request a feature][issues-url]
+[View on Packagist][packagist-url] · [Changelog][changelog-url] · [Report a bug][issues-url] · [Request a feature][issues-url]
 
   </p>
 </div>
 
+```php
+$snbt = NbtSerializer::toSnbt($item->nbtSerialize());   // {Count:1b,Name:"minecraft:diamond_sword",...}
+$tag  = NbtSerializer::fromSnbt($snbt);                 // back to the CompoundTag
+```
 
-<!-- ABOUT THE PROJECT -->
-## 🌟 About The Project
+## ✨ Highlights
 
-This library provides the most convenient and high-performance tools for handling NBT, including **SNBT** support.
-Supports multiple serialization formats to fit various use cases, from human-readable strings to compact binary representations.  
-
-### Requirements
-| | Version |
-|---|---|
-| Server | [axolotl-pm/PocketMine-MP][axolotl-url] |
-| PHP | **8.4** or newer |
-| [pocketmine/nbt][nbt-url] | `^1.2` (bundled with the server) |
-
-> Looking for the version for the original [pmmp/PocketMine-MP](https://github.com/pmmp/PocketMine-MP) 5.x (Poggit virion)?  
-> See the [`legacy/pmmp-5.44`][legacy-url] branch, or install `presentkim/nbt-serializer:^2.1`.
+- **One-liners** for SNBT, binary (big / little endian), Base64, hex and compressed formats.
+- **Fast** : up to 71% faster than the previous version and byte-for-byte compatible with `pocketmine/nbt`. [Benchmarks][performance-url]
+- **Safe for untrusted input** : every invalid input throws `NbtDataException` (or returns `null` with `tryFrom*()`),
+  with nesting depth, length and decompression size limits.
+- **Deterministic** : sorted SNBT keys and `hash()`, so equal tags always give the same string.
+- **Toolbox** : NBT paths (`tag.display.Lore[0]`), deep merge and diff.
+- **Reliable** : 129 tests, including randomized comparisons with `pocketmine/nbt`, on PHP 8.4 and 8.5.
 
 ---
 
-## 🚀 Serialization methods list
+## 📦 Installation
 
-> Every class is in the `kim\present\serializer\nbt` namespace.
+| Requirement               | Version                                                   |
+|---------------------------|-----------------------------------------------------------|
+| Server                    | [axolotl-pm/PocketMine-MP][axolotl-url]                   |
+| PHP                       | **8.4** or newer                                          |
+| [pocketmine/nbt][nbt-url] | `^1.2` (bundled with the server)                          |
 
-### 1. StringifiedNBT Serialization
-The **nbt-serializer** library is optimized for working with SNBT, a human-readable format for NBT data. 
+```bash
+composer require presentkim/nbt-serializer
+```
 
-#### Supported Functions
+> **For plugins** : bundle the `vendor` directory into the plugin and load `vendor/autoload.php` (e.g. in `onLoad()`).
+> Since it is not shaded like a virion, keep a single copy per server, or prefix the namespace with
+> [PHP-Scoper](https://github.com/humbug/php-scoper) to avoid class conflicts between plugins.
+
+> **Using the original [pmmp/PocketMine-MP](https://github.com/pmmp/PocketMine-MP) 5.x?**
+> Install `presentkim/nbt-serializer:^2.1`, or see the [`legacy/pmmp-5.44`][legacy-url] branch (Poggit virion).
+
+---
+
+## 🎯 Use cases
+
+| You want to...                                         | Use                                                    |
+|--------------------------------------------------------|--------------------------------------------------------|
+| Save items, inventories or entity data in a database   | `toCompressed()` + `base64_encode()`, or `toBase64()`  |
+| Store data humans can read and edit (configs, logs)    | `toSnbt()` / `toSnbtPretty()`                          |
+| Accept NBT from commands, forms or other players       | `tryFromSnbt($input, maxDepth: 32, maxLength: 4096)`   |
+| Read / write Bedrock files (worlds, `.mcstructure`)    | `fromBinary($data, Endian::LITTLE)`                    |
+| Read / write Java Edition `.nbt` / `.dat` files        | `fromCompressed($data)` (gzip, big endian)             |
+| Find duplicated items, cache by content                | `hash($tag)`                                           |
+| Edit a value deep in a tree                            | `NbtPath::parse("tag.display.Name")->set(...)`         |
+| Apply item templates, track changes                    | `NbtTree::merge()` / `NbtTree::diff()`                 |
+
+---
+
+## 🤔 Why use it
+
+**Shorter.** pocketmine/nbt has no SNBT writer, and its binary API needs a serializer, a `TreeRoot` and the root name every time.
+Here every format is one static call, and the decoded tag is returned directly.
+
+```php
+// pocketmine/nbt
+$data = (new BigEndianNbtSerializer())->write(new TreeRoot($tag));
+$tag = (new BigEndianNbtSerializer())->read($data)->getTag();
+
+// nbt-serializer
+$data = NbtSerializer::toBinary($tag);
+$tag = NbtSerializer::fromBinary($data);
+```
+
+**Faster.** The binary codec writes the same bytes as pocketmine/nbt, while packing numeric lists at once
+and building the decoded tags without per-entry checks. See [PERFORMANCE.md][performance-url].
+
+**Safer.** Data from players, files or the network can be malformed or malicious.
+Every `from*()` method validates the input, limits the nesting depth (512 by default) and the decompressed size (64 MiB by default),
+and throws a single exception type, so a bad input never crashes the server with a `TypeError` or a PHP warning.
+
+**Correct.** Floats are written without precision loss, any byte string survives SNBT, and the output is tested against
+pocketmine/nbt with thousands of random trees on every commit.
+
+---
+
+## 🗂️ Choosing a format
+
+Sizes of an inventory of 36 different items :
+
+| Format                     | Methods                              | Size     | Human readable | Text safe | Notes                                          |
+|----------------------------|--------------------------------------|----------|:--------------:|:---------:|------------------------------------------------|
+| SNBT                       | `toSnbt()` / `fromSnbt()`            | 5.9 KB   | ✅              | ✅         | The format of Minecraft commands               |
+| Binary                     | `toBinary()` / `fromBinary()`        | 6.4 KB   | ❌              | ❌         | Fastest, use a `BLOB` column                   |
+| Base64                     | `toBase64()` / `fromBase64()`        | 8.5 KB   | ❌              | ✅         | Binary for text storage                        |
+| Hex                        | `toHex()` / `fromHex()`              | 12.8 KB  | ❌              | ✅         | Binary for alphanumeric only channels          |
+| Compressed                 | `toCompressed()` / `fromCompressed()`| 1.3 KB   | ❌              | ❌         | Smallest, `base64_encode()` it for text (1.8 KB) |
+
+Every binary based method takes an `Endian` (`Endian::BIG` by default, `Endian::LITTLE` for Bedrock Edition files).
+
+---
+
+## 🚀 Usage
+
+Every class is in the `kim\present\serializer\nbt` namespace.
+
+### SNBT
+
 ```php
 NbtSerializer::toSnbt(Tag $tag, bool $sortKeys = true) : string
 NbtSerializer::toSnbtPretty(Tag $tag, int $indentLevel = 0, string $indentChar = "    ", string $lineBreak = "\n", bool $sortKeys = true) : string
 NbtSerializer::fromSnbt(string $contents, int $maxDepth = 512, ?int $maxLength = null) : Tag
 NbtSerializer::tryFromSnbt(string $contents, int $maxDepth = 512, ?int $maxLength = null) : ?Tag
 ```
-> Compound entries are sorted by key by default, so equal tags always produce the same string.
-> Pass `sortKeys: false` to keep the insertion order.
 
-#### Result example
 ```js
 {
     Count: 1b,
@@ -67,154 +139,87 @@ NbtSerializer::tryFromSnbt(string $contents, int $maxDepth = 512, ?int $maxLengt
     Name: "minecraft:diamond_sword",
     Slot: 12b,
     tag: {
-        generatedBy: "GPT",
-        itemType: "weapon",
-        rarity: "legendary",
-        stats: {
-            attackDamage: 20,
-            criticalChance: 15f,
-            skill: "Dragon’s Breath"
-        }
+        RepairCost: 3,
+        display: {
+            Lore: ["Forged in dragon’s fire", "Damage +20"],
+            Name: "Dragon Slayer"
+        },
+        ench: [{id: 9s, lvl: 5s}, {id: 12s, lvl: 2s}]
     }
 }
 ```
 
-#### What is SNBT?
-SNBT, or **Stringified Named Binary Tag**, represents NBT data in a textual, human-readable format.
-It provides developers and users with an easier way to read, debug, and modify NBT data compared to the traditional binary format.  
-This format is commonly used in Minecraft commands, data packs, and debugging workflows.
-
-This format is highly accessible compared to its binary equivalent, making it ideal for debugging or manual editing.  
-The **nbt-serializer** library ensures **efficient** and **accurate** SNBT serialization and deserialization, saving you time and effort!
-
-For more details, see [Official SNBT Documentation](https://minecraft.wiki/w/NBT_format#SNBT_format).
-
-#### Format notes
-- `fromSnbt()` throws `pocketmine\nbt\NbtDataException` (or its subclasses) for every invalid input,
-  including out of range numbers, mixed list entry types, nesting deeper than 512 and trailing data after the value.
-- Floating point values are written without precision loss (e.g. `0.30000000000000004d`),
-  and non-finite values are written as `NaN`, `Infinity` and `-Infinity` with the `f` / `d` suffix.
-- Strings are quoted with `"` and only quotes, backslashes and control characters are escaped,
-  so every byte (including invalid UTF-8) is preserved.
+- Compound entries are **sorted by key** by default, so equal tags always produce the same string.
+  Pass `sortKeys: false` to keep the insertion order.
+- Floats are written without precision loss (`0.30000000000000004d`), non-finite values as `NaN`, `Infinity`, `-Infinity` with the `f` / `d` suffix.
+- Strings are quoted with `"` and only quotes, backslashes and control characters are escaped, so unicode stays readable and every byte is preserved.
 - Both `"` and `'` quoted strings are accepted, with the `\\`, `\"`, `\'`, `\n`, `\t`, `\uXXXX`, ... escapes.
+- See the [Minecraft wiki](https://minecraft.wiki/w/NBT_format#SNBT_format) for the SNBT syntax.
 
-#### Use Cases
-- **Searchable Databases**: Store NBT data in SNBT format to enable fast and human-readable queries in databases.
-- **User Commands and Configuration**: Load or define NBT data directly from user input or configuration files with minimal overhead.
-- **Debugging and Logging**: Easily inspect and log NBT structures in a readable format for debugging purposes.
-- **Minecraft Data Packs**: Seamlessly integrate with Minecraft commands and data packs, which commonly utilize SNBT for defining custom structures.
+### Binary, Base64 and Hex
 
----
-
-### 2. Binary Serialization
-Efficiently serialize NBT tags into a compact binary format, byte-for-byte identical to
-`pocketmine\nbt\BigEndianNbtSerializer` (default, Java Edition files) or `LittleEndianNbtSerializer` (`Endian::LITTLE`, Bedrock Edition files).
-
-#### Supported Functions
 ```php
 NbtSerializer::toBinary(Tag $tag, Endian $endian = Endian::BIG) : string
 NbtSerializer::fromBinary(string $contents, Endian $endian = Endian::BIG, int $maxDepth = 512) : Tag
-NbtSerializer::tryFromBinary(string $contents, Endian $endian = Endian::BIG, int $maxDepth = 512) : ?Tag
-```
-> Unlike pocketmine/nbt, negative values of `TAG_Int_Array` are decoded with their sign.
 
-#### Result example
-> It contains values that cannot be expressed in text, so provides Unicode Escaped content.
-```
-\n\u0000\u0000\u0001\u0000\u0005Count\u0001\u0001\u0000\u0004Slot\f\b\u0000\u0004Name\u0000\u0017minecraft:diamond_sword\u0002\u0000\u0006Damage\u0000\u0000\n\u0000\u0003tag\b\u0000\u0006rarity\u0000\tlegendary\b\u0000\bitemType\u0000\u0006weapon\n\u0000\u0005stats\u0003\u0000\fattackDamage\u0000\u0000\u0000\u0014\u0005\u0000\u000ecriticalChanceAp\u0000\u0000\b\u0000\u0005skill\u0000\u0011Dragon\u2019s Breath\u0000\b\u0000\u000bgeneratedBy\u0000\u0003GPT\u0000\u0000
-```
-
-#### Why Use Binary Serialization?
-Binary serialization is optimal for:
-- Storing or transmitting NBT data with minimal size overhead.
-- Ensuring fast data processing and parsing.
-
-However, this format is **not suitable for text-based storage** (e.g., JSON or databases) without additional encoding.
-
----
-
-### 3. Base64-Encoded Binary Serialization
-Base64 encoding allows binary data to be represented in text format, making it suitable for text-based storage.
-
-#### Supported Functions
-```php
 NbtSerializer::toBase64(Tag $tag, Endian $endian = Endian::BIG) : string
 NbtSerializer::fromBase64(string $contents, Endian $endian = Endian::BIG, int $maxDepth = 512) : Tag
-NbtSerializer::tryFromBase64(string $contents, Endian $endian = Endian::BIG, int $maxDepth = 512) : ?Tag
-```
 
-#### Result example
-```
-CgAAAQAFQ291bnQBAQAEU2xvdAwIAAROYW1lABdtaW5lY3JhZnQ6ZGlhbW9uZF9zd29yZAIABkRhbWFnZQAACgADdGFnCAAGcmFyaXR5AAlsZWdlbmRhcnkIAAhpdGVtVHlwZQAGd2VhcG9uCgAFc3RhdHMDAAxhdHRhY2tEYW1hZ2UAAAAUBQAOY3JpdGljYWxDaGFuY2VBcAAACAAFc2tpbGwAEURyYWdvbuKAmXMgQnJlYXRoAAgAC2dlbmVyYXRlZEJ5AANHUFQAAA==
-```
-
-#### Use Cases
-- Storing binary NBT data in text-based systems like JSON, URLs, or databases.
-- Ensuring compatibility while preserving data integrity.
-
----
-
-### 4. Hexadecimal-Encoded Binary Serialization
-Hexadecimal encoding provides an alternative way to convert binary data into a human-readable text format.
-
-#### Supported Functions
-```php
 NbtSerializer::toHex(Tag $tag, Endian $endian = Endian::BIG) : string
 NbtSerializer::fromHex(string $contents, Endian $endian = Endian::BIG, int $maxDepth = 512) : Tag
-NbtSerializer::tryFromHex(string $contents, Endian $endian = Endian::BIG, int $maxDepth = 512) : ?Tag
 ```
 
-#### Result example
-```
-0a0000010005436f756e7401010004536c6f740c0800044e616d6500176d696e6563726166743a6469616d6f6e645f73776f726402000644616d61676500000a000374616708000672617269747900096c6567656e646172790800086974656d547970650006776561706f6e0a0005737461747303000c61747461636b44616d6167650000001405000e637269746963616c4368616e636541700000080005736b696c6c0011447261676f6ee2809973204272656174680008000b67656e657261746564427900034750540000
-```
+The binary output is byte-for-byte identical to `pocketmine\nbt\BigEndianNbtSerializer` / `LittleEndianNbtSerializer`
+(the root tag is written with an empty name). Unlike pocketmine/nbt, negative `TAG_Int_Array` values are decoded with their sign.
 
-#### Use Cases
-- Debugging binary NBT data with an easily visualized format.
-- Transmitting NBT data through mediums that support only alphanumeric characters.
+### Compressed binary
 
----
-
-### 5. Compressed Binary Serialization
-Compress the binary format with gzip (default, the format of Java Edition `.nbt` / `.dat` files), zlib or raw deflate.
-NBT repeats the same key names a lot, so it is usually several times smaller.
-
-#### Supported Functions
 ```php
 NbtSerializer::toCompressed(Tag $tag, Compression $compression = Compression::GZIP, Endian $endian = Endian::BIG, int $level = -1) : string
 NbtSerializer::fromCompressed(string $contents, Compression $compression = Compression::GZIP, Endian $endian = Endian::BIG, int $maxDepth = 512, int $maxLength = 64 MiB) : Tag
-NbtSerializer::tryFromCompressed(/* same as fromCompressed */) : ?Tag
 ```
-> `$maxLength` limits the size of the decompressed data, to protect against decompression bombs.  
-> Combine with `base64_encode()` to store it in text-based storage.
 
----
+- `Compression::GZIP` : the format of Java Edition `.nbt` / `.dat` files
+- `Compression::ZLIB` : zlib (`gzcompress()`)
+- `Compression::DEFLATE` : raw deflate, the smallest output
 
-## 🧰 Utilities
+`$maxLength` limits the size of the decompressed data, to protect against decompression bombs.
 
-### Deserializing untrusted input
-Every `from*()` method has a `tryFrom*()` variant returning `null` instead of throwing,
-and accepts `$maxDepth` (nesting depth of compound and list tags, 512 by default) to reject maliciously deep data.
 ```php
-$tag = NbtSerializer::tryFromSnbt($userInput, maxDepth: 32, maxLength: 4096);
+// store an inventory in a text column
+$contents = base64_encode(NbtSerializer::toCompressed($inventoryTag, Compression::DEFLATE));
+$inventoryTag = NbtSerializer::fromCompressed(base64_decode($contents), Compression::DEFLATE);
+```
+
+### Untrusted input
+
+Every `from*()` method has a `tryFrom*()` variant returning `null` instead of throwing :
+`tryFromSnbt()`, `tryFromBinary()`, `tryFromBase64()`, `tryFromHex()`, `tryFromCompressed()`.
+
+```php
+$tag = NbtSerializer::tryFromSnbt($args[0], maxDepth: 32, maxLength: 4096);
 if($tag === null){
-    // invalid input
+    $sender->sendMessage("Invalid NBT");
+    return;
 }
 ```
 
 ### Hashing
+
 ```php
 NbtSerializer::hash(Tag $tag, string $algo = "xxh128") : string
 ```
-Equal tags always have the same hash, regardless of the order of the compound entries.
-Useful for deduplication, cache keys and comparing items.
+
+Equal tags (by `Tag::equals()`) always have the same hash, regardless of the order of the compound entries.
+Any algorithm supported by `hash()` can be used.
 
 ### NBT path
-Read and modify a tag deep in the tree with a path like the Minecraft NBT path.
-```php
-use kim\present\serializer\nbt\NbtPath;
 
-$path = NbtPath::parse('tag.display.Lore[0]');  // parsed paths are cached
+Read and modify a tag deep in the tree, with a path like the Minecraft NBT path.
+
+```php
+$path = NbtPath::parse('tag.display.Lore[0]');   // parsed paths are cached
+
 $path->get($tag);                                 // ?Tag
 $path->has($tag);                                 // bool
 $path->set($tag, new StringTag("First line"));    // missing compounds are created
@@ -223,20 +228,24 @@ $path->remove($tag);                              // bool, whether it existed
 NbtPath::parse('tag."key with.dot"[-1]');         // quoted keys, negative index from the end
 (string) NbtPath::of("tag", "a.b", 0);            // 'tag."a.b"[0]'
 ```
-- `key` / `"key"` / `'key'` : entry of a compound tag
-- `[index]` : entry of a list tag (byte / int arrays can be read too), `[-1]` is the last entry
-- an empty path is the root tag itself
-- an invalid path, or a `set()` that can not be applied, throws `NbtPathException`
+
+| Syntax                     | Meaning                                                                 |
+|----------------------------|-------------------------------------------------------------------------|
+| `key`, `"key"`, `'key'`    | Entry of a compound tag, joined with `.`                                |
+| `[index]`                  | Entry of a list tag (byte / int arrays can be read too), `[-1]` is the last |
+| (empty string)             | The root tag itself                                                     |
+
+`set()` either fully succeeds or leaves the tree unchanged.
 
 ### Merge and diff
-```php
-use kim\present\serializer\nbt\NbtTree;
 
-// deep merge like the `/data merge` command, neither of the arguments is modified
-$merged = NbtTree::merge($base, $patch);
+```php
+// deep merge like the `/data merge` command, neither argument is modified
+$merged = NbtTree::merge($template, $patch);
 
 // differences between two trees
 foreach(NbtTree::diff($old, $new) as $change){
+    // $change->path (NbtPath), $change->old (?Tag), $change->new (?Tag)
     echo $change->path, " : ", $change->isAdded() ? "added" : ($change->isRemoved() ? "removed" : "modified"), "\n";
 }
 
@@ -246,44 +255,44 @@ NbtTree::apply($target, NbtTree::diff($old, $new));
 
 ---
 
-## 📊 Performance test results
+## ⚠️ Exceptions
 
-Provide performance test results to help you choose the serialization method.
+| Exception                                               | Thrown when                                                                  |
+|---------------------------------------------------------|------------------------------------------------------------------------------|
+| `pocketmine\nbt\NbtDataException`                       | Invalid NBT data in any format (SNBT errors are `SnbtSyntaxException` / `SnbtDataException`) |
+| `InvalidArgumentException`                              | Invalid Base64 / hex encoding, invalid arguments (e.g. `maxLength < 1`), strings too long for NBT |
+| `kim\present\serializer\nbt\exception\NbtPathException` | Invalid path syntax, or a `set()` that can not be applied                    |
 
-See [Performance Test Results][performance-url]
+The `tryFrom*()` methods return `null` for invalid input instead.
 
------
+---
 
-## 🛠️ Installation
+## 📊 Performance
 
-The package is published on [Packagist][packagist-url], install it with [Composer](https://getcomposer.org) :
-```bash
-composer require presentkim/nbt-serializer
-```
-or add it to your `composer.json` :
-```json
-{
-  "require": {
-    "presentkim/nbt-serializer": "^3.0"
-  }
-}
-```
-See [CHANGELOG.md][changelog-url] for the changes of each version.
+| Operation (µs, PHP 8.3 + OPcache) | Item    | Inventory (36 items) | Numeric lists |
+|-----------------------------------|---------|----------------------|---------------|
+| `toBinary`                        | 4.6     | 161                  | 92            |
+| `fromBinary`                      | 10.1    | 353                  | 305           |
+| `toSnbt`                          | 5.9     | 216                  | 835           |
+| `fromSnbt`                        | 15.5    | 549                  | 1887          |
 
-When distributing a plugin, bundle the `vendor` directory into the plugin and load `vendor/autoload.php` (e.g. in `onLoad()`).  
-Since the library is no longer shaded as a virion, use a single copy of it per server (or prefix the namespace with a tool such as [PHP-Scoper](https://github.com/humbug/php-scoper)) to avoid class conflicts between plugins.
+The binary formats are 1.3~1.5 times faster than SNBT for items, and 6~9 times faster for numeric data.
+See [PERFORMANCE.md][performance-url] for the details.
 
-### Running tests
+---
+
+## 🛠️ Development
+
 ```bash
 composer install
 composer test
 ```
 
------
+Contributions are welcome. Please open an [issue][issues-url] for bugs and feature requests.
 
 ## 📝 License
 
-Distributed under the **MIT**. See [LICENSE][license-url] for more information
+Distributed under the **MIT** License. See [LICENSE][license-url] for more information.
 
 
 [packagist-badge]: https://img.shields.io/packagist/v/presentkim/nbt-serializer.svg?style=for-the-badge
@@ -294,19 +303,15 @@ Distributed under the **MIT**. See [LICENSE][license-url] for more information
 
 [php-badge]: https://img.shields.io/badge/php-%3E%3D8.4-777BB4.svg?style=for-the-badge
 
-[stars-badge]: https://img.shields.io/github/stars/presentkim-pm/nbt-serializer.svg?style=for-the-badge
-
 [license-badge]: https://img.shields.io/github/license/presentkim-pm/nbt-serializer.svg?style=for-the-badge
-
-[ci-url]: https://github.com/presentkim-pm/nbt-serializer/actions/workflows/ci.yml
-
-[php-url]: https://www.php.net/releases/8.4/
 
 [packagist-url]: https://packagist.org/packages/presentkim/nbt-serializer
 
 [changelog-url]: https://github.com/presentkim-pm/nbt-serializer/blob/main/CHANGELOG.md
 
-[repo-url]: https://github.com/presentkim-pm/nbt-serializer
+[ci-url]: https://github.com/presentkim-pm/nbt-serializer/actions/workflows/ci.yml
+
+[php-url]: https://www.php.net/releases/8.4/
 
 [axolotl-url]: https://github.com/axolotl-pm/PocketMine-MP
 
@@ -314,12 +319,8 @@ Distributed under the **MIT**. See [LICENSE][license-url] for more information
 
 [legacy-url]: https://github.com/presentkim-pm/nbt-serializer/tree/legacy/pmmp-5.44
 
-[stars-url]: https://github.com/presentkim-pm/nbt-serializer/stargazers
-
 [issues-url]: https://github.com/presentkim-pm/nbt-serializer/issues
 
 [license-url]: https://github.com/presentkim-pm/nbt-serializer/blob/main/LICENSE
 
 [performance-url]: https://github.com/presentkim-pm/nbt-serializer/blob/main/PERFORMANCE.md
-
-[project-icon]: https://raw.githubusercontent.com/presentkim-pm/nbt-serializer/main/assets/icon.png
