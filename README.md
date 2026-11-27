@@ -1,6 +1,8 @@
 <!-- PROJECT BADGES -->
 <div align="center">
 
+[![Packagist][packagist-badge]][packagist-url]
+[![Downloads][downloads-badge]][packagist-url]
 [![CI][ci-badge]][ci-url]
 [![PHP][php-badge]][php-url]
 [![Stars][stars-badge]][stars-url]
@@ -16,7 +18,7 @@
   <p align="center">
     A powerful library that makes (de)serializing NBT shorter, faster, and easier!
 
-[View on GitHub][repo-url] · [Report a bug][issues-url] · [Request a feature][issues-url]
+[View on Packagist][packagist-url] · [View on GitHub][repo-url] · [Report a bug][issues-url] · [Request a feature][issues-url]
 
   </p>
 </div>
@@ -36,7 +38,7 @@ Supports multiple serialization formats to fit various use cases, from human-rea
 | [pocketmine/nbt][nbt-url] | `^1.2` (bundled with the server) |
 
 > Looking for the version for the original [pmmp/PocketMine-MP](https://github.com/pmmp/PocketMine-MP) 5.x (Poggit virion)?  
-> See the [`legacy/pmmp-5.44`][legacy-url] branch.
+> See the [`legacy/pmmp-5.44`][legacy-url] branch, or install `presentkim/nbt-serializer:^2.1`.
 
 ---
 
@@ -254,10 +256,19 @@ See [Performance Test Results][performance-url]
 
 ## 🛠️ Installation
 
-Install with [Composer](https://getcomposer.org) :
+The package is published on [Packagist][packagist-url], install it with [Composer](https://getcomposer.org) :
 ```bash
 composer require presentkim/nbt-serializer
 ```
+or add it to your `composer.json` :
+```json
+{
+  "require": {
+    "presentkim/nbt-serializer": "^3.0"
+  }
+}
+```
+See [CHANGELOG.md][changelog-url] for the changes of each version.
 
 When distributing a plugin, bundle the `vendor` directory into the plugin and load `vendor/autoload.php` (e.g. in `onLoad()`).  
 Since the library is no longer shaded as a virion, use a single copy of it per server (or prefix the namespace with a tool such as [PHP-Scoper](https://github.com/humbug/php-scoper)) to avoid class conflicts between plugins.
@@ -275,6 +286,10 @@ composer test
 Distributed under the **MIT**. See [LICENSE][license-url] for more information
 
 
+[packagist-badge]: https://img.shields.io/packagist/v/presentkim/nbt-serializer.svg?style=for-the-badge
+
+[downloads-badge]: https://img.shields.io/packagist/dt/presentkim/nbt-serializer.svg?style=for-the-badge
+
 [ci-badge]: https://img.shields.io/github/actions/workflow/status/presentkim-pm/nbt-serializer/ci.yml?branch=main&style=for-the-badge
 
 [php-badge]: https://img.shields.io/badge/php-%3E%3D8.4-777BB4.svg?style=for-the-badge
@@ -286,6 +301,10 @@ Distributed under the **MIT**. See [LICENSE][license-url] for more information
 [ci-url]: https://github.com/presentkim-pm/nbt-serializer/actions/workflows/ci.yml
 
 [php-url]: https://www.php.net/releases/8.4/
+
+[packagist-url]: https://packagist.org/packages/presentkim/nbt-serializer
+
+[changelog-url]: https://github.com/presentkim-pm/nbt-serializer/blob/main/CHANGELOG.md
 
 [repo-url]: https://github.com/presentkim-pm/nbt-serializer
 
