@@ -480,3 +480,40 @@ The output of every operation was verified to be identical to the previous imple
 ```
 
 -----
+
+---
+
+## Optimization results (2026-11, `02be27e` → `a247582`)
+
+- **Environment** : PHP 8.3.6 CLI, `pocketmine/nbt` 1.2, OPcache enabled (`opcache.enable_cli=1`), JIT off
+- **Method** : each operation repeated, best of 25 runs, best of 3 alternating rounds (µs per operation)
+- **Data sets**
+  - `item` : a single item-like compound (display name, lore, enchantments, numbers)
+  - `inventory` : a list of 36 such items
+  - `numbers` : lists of 1000 ints / doubles / bytes, an int array of 1000 and a byte array of 999
+  - `strings` : a compound of 300 strings (plain, quotes and backslashes, unicode, control characters)
+
+| Data set  | toBinary         | fromBinary       | toSnbt           | fromSnbt          |
+|-----------|------------------|------------------|------------------|-------------------|
+| item      | 5.3 → 4.6 (-13%) | 12.2 → 10.1 (-17%) | 6.3 → 5.9 (-6%) | 16.2 → 15.5 (-4%) |
+| inventory | 190 → 161 (-15%) | 427 → 353 (-17%) | 225 → 216 (-4%)  | 573 → 549 (-4%)   |
+| numbers   | 314 → 92 (-71%)  | 838 → 305 (-64%) | 985 → 835 (-15%) | 2330 → 1887 (-19%) |
+| strings   | 86 → 67 (-21%)   | 185 → 145 (-21%) | 140 → 132 (-5%)  | 300 → 303 (±0%)   |
+
+With the tracing JIT enabled, every operation is 30~45% faster again, with similar relative improvements.
+
+### What was changed
+- **Binary** : lists of fixed size values (byte, short, int, long, float, double) are written and read with a single `pack()` / `unpack()`,
+  bounds checks and the scalar entries of compound tags are inlined.
+- **Building tags** : decoded list and compound tags are built at once with their validated entries,
+  instead of `ListTag::push()` / `CompoundTag::setTag()` per entry (10~37% of the decoding time).
+  It relies on the internal layout of pocketmine/nbt, and falls back to the public API if the layout changes.
+- **SNBT parser** : unquoted values in lists and compounds are parsed without the recursive `readTag()`,
+  byte / int arrays are matched with one `preg_match_all()`.
+- **SNBT writer** : typed fast paths for lists of integers and strings, inlined scalar entries of compound tags.
+
+### What can not be improved much
+- **SNBT floats** : the shortest lossless representation (`var_export()`, ~450 ns per value) dominates `toSnbt` of float-heavy data.
+  Faster alternatives (`sprintf("%.17G")`) are not lossless in PHP.
+- **SNBT parsing** : the cost is spread evenly over `substr()`, number checks, tag constructors and calls (~500 ns per value), close to the floor of PHP.
+- **Tag constructors** of pocketmine/nbt (~65 ns each, with argument count and range checks) are a fixed cost of every decoding.
