@@ -148,23 +148,23 @@ final class StringifiedNbtParser{
             return new StringTag($this->readQuotedString($c));
         }
 
-        if(++$this->depth > $this->maxDepth){
-            throw new SnbtDataException("nesting depth exceeds {$this->maxDepth}", $end);
-        }
-        if($c === "{"){ // start of compound tag
-            $tag = $this->readCompoundTag();
-        }else{ // start of collection
+        if($c === "["){ // start of collection
             $head = substr($buffer, $end + 1, 2);
             if($head === "B;" || $head === "b;"){
                 $this->offset += 2;
-                $tag = $this->readByteArrayTag();
-            }elseif($head === "I;" || $head === "i;"){
+                return $this->readByteArrayTag();
+            }
+            if($head === "I;" || $head === "i;"){
                 $this->offset += 2;
-                $tag = $this->readIntArrayTag();
-            }else{
-                $tag = $this->readListTag();
+                return $this->readIntArrayTag();
             }
         }
+
+        // compound and list tags count toward the nesting depth
+        if(++$this->depth > $this->maxDepth){
+            throw new SnbtDataException("nesting depth exceeds {$this->maxDepth}", $end);
+        }
+        $tag = $c === "{" ? $this->readCompoundTag() : $this->readListTag();
         $this->depth--;
         return $tag;
     }
@@ -269,14 +269,19 @@ final class StringifiedNbtParser{
         $offset = $this->offset;
         $this->offset = $closePos + 1;
         $contents = substr($this->buffer, $offset, $closePos - $offset);
-        if(strspn($contents, self::WHITESPACES) === strlen($contents)){
+        if(trim($contents) === ""){
             return [];
         }
 
-        // every entry must be matched contiguously from the start (a trailing comma is allowed)
-        $count = preg_match_all('/\G\s*([+-]?\d+)' . $suffix . '\s*(?:,|\z)/', $contents, $matches);
-        if($count === 0 || strlen(implode("", $matches[0])) !== strlen($contents)){
-            throw new SnbtSyntaxException("unexpected char", $offset, $expected);
+        // every entry must be matched contiguously from the start (a trailing comma is allowed),
+        // the spaces around the entries are the characters stripped by trim()
+        preg_match_all('/\G[ \t\n\r\x00\x0B]*([+-]?\d+)' . $suffix . '[ \t\n\r\x00\x0B]*(?:,|\z)/', $contents, $matches);
+        $consumed = strlen(implode("", $matches[0]));
+        if($consumed !== strlen($contents)){
+            $rest = substr($contents, $consumed);
+            $commaPos = strpos($rest, ",");
+            $entry = trim($commaPos === false ? $rest : substr($rest, 0, $commaPos));
+            throw new SnbtSyntaxException("unexpected '$entry'", $offset, $expected);
         }
         return $matches[1];
     }

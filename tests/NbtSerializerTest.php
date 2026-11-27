@@ -196,6 +196,34 @@ final class NbtSerializerTest extends TestCase{
         NbtSerializer::fromSnbt($snbt);
     }
 
+    public function testArraysDoNotCountTowardDepth() : void{
+        self::assertNotNull(NbtSerializer::tryFromSnbt("{a:[B;1b],b:[I;1]}", maxDepth: 1));
+        self::assertNull(NbtSerializer::tryFromSnbt("{a:[1]}", maxDepth: 1));
+    }
+
+    public function testArraySpacesAreTrimCharacters() : void{
+        self::assertTrue(NbtSerializer::fromSnbt("[I; 1\t,\n2\x00 ,\x0B3 ]")->equals(new IntArrayTag([1, 2, 3])));
+        self::assertTrue(NbtSerializer::fromSnbt("[B;1b\x00]")->equals(new ByteArrayTag("\x01")));
+        self::assertNull(NbtSerializer::tryFromSnbt("[I;1\x0c]"));
+        try{
+            NbtSerializer::fromSnbt("[I;1, x ,2]");
+            self::fail("must throw");
+        }catch(NbtDataException $e){
+            self::assertStringContainsString("unexpected 'x'", $e->getMessage());
+        }
+    }
+
+    public function testTruncatedBinaryMessages() : void{
+        foreach(["" => "need 1, have 0", "\x0a\x00" => "need 2, have 1", "\x09\x00\x00\x03\x00" => "need 4, have 1"] as $binary => $message){
+            try{
+                NbtSerializer::fromBinary((string) $binary);
+                self::fail("must throw");
+            }catch(NbtDataException $e){
+                self::assertStringContainsString($message, $e->getMessage());
+            }
+        }
+    }
+
     public function testInvalidEncodings() : void{
         try{
             NbtSerializer::fromBase64("!!!");

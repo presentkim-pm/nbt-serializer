@@ -252,11 +252,8 @@ final class BinaryNbtCodec{
      */
     public function decode(string $buffer, int $maxDepth) : Tag{
         $length = strlen($buffer);
-        if($length < 3){
-            if($length > 0 && $buffer[0] === "\x00"){
-                throw new NbtDataException("Found TAG_End at the start of buffer");
-            }
-            self::throwNotEnough(3, $length);
+        if($length === 0){
+            self::throwNotEnough(1, 0);
         }
         $type = ord($buffer[0]);
         if($type === 0){
@@ -321,12 +318,15 @@ final class BinaryNbtCodec{
                 if(--$depth < 0){
                     throw new NbtDataException("Nesting depth limit exceeded");
                 }
-                if($length - $offset < 5){
-                    self::throwNotEnough(5, $length - $offset);
+                if($offset >= $length){
+                    self::throwNotEnough(1, 0);
                 }
-                $childType = ord($buffer[$offset]);
-                $size = unpack($this->int, $buffer, $offset + 1)[1] << 32 >> 32;
-                $offset += 5;
+                $childType = ord($buffer[$offset++]);
+                if($length - $offset < 4){
+                    self::throwNotEnough(4, $length - $offset);
+                }
+                $size = unpack($this->int, $buffer, $offset)[1] << 32 >> 32;
+                $offset += 4;
                 if($size <= 0){
                     return new ListTag([], $childType);
                 }
@@ -339,7 +339,8 @@ final class BinaryNbtCodec{
                 if($width !== null){ // list of fixed size values : unpack them at once
                     $byteLength = $size * $width;
                     if($length - $offset < $byteLength){
-                        self::throwNotEnough($byteLength, $length - $offset);
+                        // report the first incomplete entry, as reading them one by one does
+                        self::throwNotEnough($width, ($length - $offset) % $width);
                     }
                     $values = unpack($this->formats[$childType] . $size, $buffer, $offset);
                     $offset += $byteLength;
