@@ -43,21 +43,18 @@ use pocketmine\nbt\tag\ShortTag;
 use pocketmine\nbt\tag\StringTag;
 use pocketmine\nbt\tag\Tag;
 
-use function array_pop;
 use function chr;
-use function count;
-use function explode;
 use function hexdec;
 use function is_int;
 use function is_numeric;
-use function preg_match;
+use function implode;
+use function preg_match_all;
 use function preg_replace_callback;
 use function strcspn;
 use function strlen;
 use function strpbrk;
 use function strpos;
 use function strspn;
-use function strtoupper;
 use function substr;
 use function trim;
 
@@ -139,11 +136,7 @@ final class StringifiedNbtParser{
 
         if($c === null || $c === "," || $c === "}" || $c === "]"){ // end of the value (or of the parent tag)
             $this->offset = $end;
-            $value = trim(substr($buffer, $offset, $runLength));
-            if($value === ""){
-                throw new SnbtDataException("empty value", $end);
-            }
-            return self::parseValue($value, $offset);
+            return self::parseScalar($buffer, $offset, $runLength);
         }
 
         if($runLength !== 0 && strspn($buffer, self::WHITESPACES, $offset, $runLength) !== $runLength){
@@ -155,47 +148,49 @@ final class StringifiedNbtParser{
             return new StringTag($this->readQuotedString($c));
         }
 
-        if($c === "{"){ // start of compound tag
-            $this->enter();
-            $tag = $this->readCompoundTag();
-            $this->depth--;
-            return $tag;
+        if(++$this->depth > $this->maxDepth){
+            throw new SnbtDataException("nesting depth exceeds {$this->maxDepth}", $end);
         }
-
-        // start of collection
-        if(isset($buffer[$this->offset + 1])){
-            $listHead = strtoupper(substr($buffer, $this->offset, 2));
-            if($listHead === "B;"){
+        if($c === "{"){ // start of compound tag
+            $tag = $this->readCompoundTag();
+        }else{ // start of collection
+            $head = substr($buffer, $end + 1, 2);
+            if($head === "B;" || $head === "b;"){
                 $this->offset += 2;
-                return $this->readByteArrayTag();
-            }elseif($listHead === "I;"){
+                $tag = $this->readByteArrayTag();
+            }elseif($head === "I;" || $head === "i;"){
                 $this->offset += 2;
-                return $this->readIntArrayTag();
+                $tag = $this->readIntArrayTag();
+            }else{
+                $tag = $this->readListTag();
             }
         }
-        $this->enter();
-        $tag = $this->readListTag();
         $this->depth--;
         return $tag;
     }
 
-    private function enter() : void{
-        if(++$this->depth > $this->maxDepth){
-            throw new SnbtDataException("nesting depth exceeds {$this->maxDepth}", $this->offset - 1);
+    /**
+     * Parse the unquoted value (number with optional type suffix, or plain string)
+     * of the run of characters that ends with a structural character
+     */
+    private static function parseScalar(string $buffer, int $offset, int $runLength) : Tag{
+        if($runLength === 0){
+            throw new SnbtDataException("empty value", $offset);
         }
-    }
+        $value = substr($buffer, $offset, $runLength);
+        if($value[0] <= " " || $value[-1] <= " "){ // trim only when needed
+            $value = trim($value);
+            if($value === ""){
+                throw new SnbtDataException("empty value", $offset + $runLength);
+            }
+        }
 
-    /** Parse the unquoted value (number with optional type suffix, or plain string) */
-    private static function parseValue(string $value, int $offset) : Tag{
         $suffix = self::SUFFIXES[$value[-1]] ?? null;
         $number = $suffix !== null ? substr($value, 0, -1) : $value;
-
-        if(($suffix === "f" || $suffix === "d") && isset(self::NON_FINITE[$number])){
-            $float = self::NON_FINITE[$number];
-            return $suffix === "f" ? new FloatTag($float) : new DoubleTag($float);
-        }
-
         if(!is_numeric($number)){
+            if(($suffix === "f" || $suffix === "d") && isset(self::NON_FINITE[$number])){
+                return $suffix === "f" ? new FloatTag(self::NON_FINITE[$number]) : new DoubleTag(self::NON_FINITE[$number]);
+            }
             return new StringTag($value);
         }
 
@@ -227,34 +222,45 @@ final class StringifiedNbtParser{
     }
 
     private function readListTag() : ListTag{
-        $result = new ListTag();
+        $buffer = $this->buffer;
+        $children = [];
+        $type = 0;
         while(true){
-            $this->offset += strspn($this->buffer, self::SEPARATORS, $this->offset);
-            if(!isset($this->buffer[$this->offset])){
+            $this->offset += strspn($buffer, self::SEPARATORS, $this->offset);
+            $c = $buffer[$this->offset] ?? null;
+            if($c === null){
                 break;
             }
-
-            if($this->buffer[$this->offset] === "]"){
+            if($c === "]"){
                 $this->offset++;
-                return $result;
+                return TagFactory::list($children, $type);
             }
 
             $offset = $this->offset;
-            $tag = $this->readTag();
-            if($result->count() !== 0 && $tag->getType() !== $result->getTagType()){
+            $runLength = strcspn($buffer, ",}]\"'{[", $offset);
+            $end = $buffer[$offset + $runLength] ?? null;
+            if($end === "," || $end === "]" || $end === "}" || $end === null){ // fast path for unquoted values
+                $this->offset = $offset + $runLength;
+                $tag = self::parseScalar($buffer, $offset, $runLength);
+            }else{
+                $tag = $this->readTag();
+            }
+            if($children === []){
+                $type = $tag->getType();
+            }elseif($tag->getType() !== $type){
                 throw new SnbtDataException("list entries must be the same type", $offset);
             }
-            $result->push($tag);
+            $children[] = $tag;
         }
         throw new SnbtUnexpectedEndException("']'");
     }
 
     /**
-     * Read the comma separated entries of an array (until ']') and validate them with the pattern
+     * Read the comma separated entries of an array (until ']'), each must be an integer followed by the suffix
      *
-     * @return string[] the first capture group of each entry
+     * @return string[] the integer of each entry
      */
-    private function readArrayEntries(string $pattern, string $expected) : array{
+    private function readArrayEntries(string $suffix, string $expected) : array{
         $closePos = strpos($this->buffer, "]", $this->offset);
         if($closePos === false){
             throw new SnbtUnexpectedEndException("']'");
@@ -262,26 +268,23 @@ final class StringifiedNbtParser{
 
         $offset = $this->offset;
         $this->offset = $closePos + 1;
-
-        $entries = explode(",", substr($this->buffer, $offset, $closePos - $offset));
-        if(trim($entries[count($entries) - 1]) === ""){ // allow empty array and trailing comma
-            array_pop($entries);
+        $contents = substr($this->buffer, $offset, $closePos - $offset);
+        if(strspn($contents, self::WHITESPACES) === strlen($contents)){
+            return [];
         }
 
-        $result = [];
-        foreach($entries as $entry){
-            if(preg_match($pattern, trim($entry), $match) !== 1){
-                throw new SnbtSyntaxException("unexpected '" . trim($entry) . "'", $offset, $expected);
-            }
-            $result[] = $match[1];
+        // every entry must be matched contiguously from the start (a trailing comma is allowed)
+        $count = preg_match_all('/\G\s*([+-]?\d+)' . $suffix . '\s*(?:,|\z)/', $contents, $matches);
+        if($count === 0 || strlen(implode("", $matches[0])) !== strlen($contents)){
+            throw new SnbtSyntaxException("unexpected char", $offset, $expected);
         }
-        return $result;
+        return $matches[1];
     }
 
     private function readByteArrayTag() : ByteArrayTag{
         $offset = $this->offset;
         $result = "";
-        foreach($this->readArrayEntries('/^([+-]?\d+)[bB]$/', "byte entries") as $entry){
+        foreach($this->readArrayEntries("[bB]", "byte entries") as $entry){
             $value = (int) $entry;
             if($value < -128 || $value > 255){ // unsigned values (0 ~ 255) are accepted for the data written by older versions
                 throw new SnbtDataException("byte '$entry' is out of range", $offset);
@@ -294,8 +297,8 @@ final class StringifiedNbtParser{
     private function readIntArrayTag() : IntArrayTag{
         $offset = $this->offset;
         $result = [];
-        foreach($this->readArrayEntries('/^([+-]?\d+)$/', "integer entries") as $entry){
-            $value = +$entry;
+        foreach($this->readArrayEntries("", "integer entries") as $entry){
+            $value = isset($entry[10]) ? +$entry : (int) $entry; // up to 10 characters always fit in 64-bit
             // unsigned values (0 ~ 0xffffffff) are accepted for the arrays decoded as unsigned by pocketmine/nbt
             if(!is_int($value) || $value < -0x80000000 || $value > 0xffffffff){
                 throw new SnbtDataException("integer '$entry' is out of range", $offset);
@@ -306,7 +309,7 @@ final class StringifiedNbtParser{
     }
 
     private function readCompoundTag() : CompoundTag{
-        $tag = CompoundTag::create();
+        $entries = [];
         while(true){
             $this->offset += strspn($this->buffer, self::SEPARATORS, $this->offset);
             if(!isset($this->buffer[$this->offset])){
@@ -315,7 +318,7 @@ final class StringifiedNbtParser{
 
             $c = $this->buffer[$this->offset++];
             if($c === "}"){
-                return $tag;
+                return TagFactory::compound($entries);
             }
 
             if($c === ':'){
@@ -336,10 +339,24 @@ final class StringifiedNbtParser{
                 if($closePos === false){
                     throw new SnbtUnexpectedEndException("':'");
                 }
-                $key = trim($c . substr($this->buffer, $this->offset, $closePos - $this->offset));
+                $key = substr($this->buffer, $this->offset - 1, $closePos - $this->offset + 1);
+                if($key[-1] <= " "){ // the leading whitespaces are already skipped
+                    $key = trim($key);
+                }
                 $this->offset = $closePos + 1;
             }
-            $tag->setTag($key, $this->readTag());
+            if(isset($key[0x7fff])){
+                throw new SnbtDataException("key is longer than 32767 bytes", $this->offset);
+            }
+            $offset = $this->offset;
+            $runLength = strcspn($this->buffer, ",}]\"'{[", $offset);
+            $end = $this->buffer[$offset + $runLength] ?? null;
+            if($end === "," || $end === "}" || $end === "]" || $end === null){ // fast path for unquoted values
+                $this->offset = $offset + $runLength;
+                $entries[$key] = self::parseScalar($this->buffer, $offset, $runLength);
+            }else{
+                $entries[$key] = $this->readTag();
+            }
         }
 
         throw new SnbtUnexpectedEndException("'}'");

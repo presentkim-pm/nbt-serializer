@@ -42,7 +42,6 @@ use pocketmine\nbt\tag\Tag;
 
 use function chr;
 use function count;
-use function get_class;
 use function ord;
 use function pack;
 use function strlen;
@@ -87,10 +86,23 @@ final class BinaryNbtCodec{
         IntArrayTag::class  => self::TYPE_INT_ARRAY,
     ];
 
+    /** Byte size of the fixed size tags */
+    private const SIZE_OF_TYPE = [
+        self::TYPE_BYTE   => 1,
+        self::TYPE_SHORT  => 2,
+        self::TYPE_INT    => 4,
+        self::TYPE_LONG   => 8,
+        self::TYPE_FLOAT  => 4,
+        self::TYPE_DOUBLE => 8,
+    ];
+
     private const MAX_STRING_LENGTH = 32767;
 
     private static ?self $big = null;
     private static ?self $little = null;
+
+    /** @var array<int, string> pack() format of each fixed size tag type */
+    private readonly array $formats;
 
     /** pack() format of unsigned short, unsigned int, long, float and double */
     private function __construct(
@@ -100,6 +112,14 @@ final class BinaryNbtCodec{
         private readonly string $float,
         private readonly string $double
     ){
+        $this->formats = [
+            self::TYPE_BYTE   => "c",
+            self::TYPE_SHORT  => $short,
+            self::TYPE_INT    => $int,
+            self::TYPE_LONG   => $long,
+            self::TYPE_FLOAT  => $float,
+            self::TYPE_DOUBLE => $double,
+        ];
     }
 
     public static function get(Endian $endian) : self{
@@ -114,7 +134,7 @@ final class BinaryNbtCodec{
      * @return string|null null if the tree contains a tag type that this codec does not know
      */
     public function encode(Tag $tag) : ?string{
-        $type = self::TYPE_OF_CLASS[get_class($tag)] ?? null;
+        $type = self::TYPE_OF_CLASS[$tag::class] ?? null;
         if($type === null){
             return null;
         }
@@ -125,70 +145,102 @@ final class BinaryNbtCodec{
 
     private function writeBody(Tag $tag, int $type, string &$out) : bool{
         switch($type){
-            case self::TYPE_BYTE:
-                $out .= chr($tag->getValue() & 0xff);
-                return true;
-            case self::TYPE_SHORT:
-                $out .= pack($this->short, $tag->getValue());
-                return true;
-            case self::TYPE_INT:
-                $out .= pack($this->int, $tag->getValue());
-                return true;
-            case self::TYPE_LONG:
-                $out .= pack($this->long, $tag->getValue());
-                return true;
-            case self::TYPE_FLOAT:
-                $out .= pack($this->float, $tag->getValue());
-                return true;
-            case self::TYPE_DOUBLE:
-                $out .= pack($this->double, $tag->getValue());
-                return true;
-            case self::TYPE_BYTE_ARRAY:
-                $value = $tag->getValue();
-                $out .= pack($this->int, strlen($value)) . $value;
-                return true;
-            case self::TYPE_STRING:
-                $value = $tag->getValue();
-                $out .= pack($this->short, self::checkWriteStringLength(strlen($value))) . $value;
-                return true;
-            case self::TYPE_INT_ARRAY:
-                $value = $tag->getValue();
-                $out .= pack($this->int, count($value)) . pack($this->int . "*", ...$value);
-                return true;
-            case self::TYPE_LIST:
-                $children = $tag->getValue();
-                $out .= chr($tag->getTagType() & 0xff) . pack($this->int, count($children));
-                foreach($children as $child){
-                    $childType = self::TYPE_OF_CLASS[get_class($child)] ?? null;
-                    if($childType === null || !$this->writeBody($child, $childType, $out)){
-                        return false;
-                    }
-                }
-                return true;
             case self::TYPE_COMPOUND:
                 foreach($tag->getValue() as $name => $child){
-                    $childType = self::TYPE_OF_CLASS[get_class($child)] ?? null;
+                    $childType = self::TYPE_OF_CLASS[$child::class] ?? null;
                     if($childType === null){
                         return false;
                     }
 
                     $name = (string) $name;
-                    $out .= chr($childType) . pack($this->short, self::checkWriteStringLength(strlen($name))) . $name;
-                    if(!$this->writeBody($child, $childType, $out)){
-                        return false;
+                    $nameLength = strlen($name);
+                    if($nameLength > self::MAX_STRING_LENGTH){
+                        self::throwStringTooLong($nameLength);
+                    }
+                    $out .= chr($childType) . pack($this->short, $nameLength) . $name;
+                    switch($childType){ // inlined scalar types, the most common entries
+                        case self::TYPE_BYTE:
+                            $out .= chr($child->getValue() & 0xff);
+                            break;
+                        case self::TYPE_STRING:
+                            $value = $child->getValue();
+                            $valueLength = strlen($value);
+                            if($valueLength > self::MAX_STRING_LENGTH){
+                                self::throwStringTooLong($valueLength);
+                            }
+                            $out .= pack($this->short, $valueLength) . $value;
+                            break;
+                        case self::TYPE_SHORT:
+                        case self::TYPE_INT:
+                        case self::TYPE_LONG:
+                        case self::TYPE_FLOAT:
+                        case self::TYPE_DOUBLE:
+                            $out .= pack($this->formats[$childType], $child->getValue());
+                            break;
+                        default:
+                            if(!$this->writeBody($child, $childType, $out)){
+                                return false;
+                            }
                     }
                 }
                 $out .= "\x00";
+                return true;
+            case self::TYPE_LIST:
+                $children = $tag->getValue();
+                $childType = $tag->getTagType();
+                $out .= chr($childType & 0xff) . pack($this->int, count($children));
+                if($children === []){
+                    return true;
+                }
+
+                if(isset(self::SIZE_OF_TYPE[$childType])){ // list of fixed size values : pack them at once
+                    $values = [];
+                    foreach($children as $child){
+                        $values[] = $child->getValue();
+                    }
+                    $out .= pack($this->formats[$childType] . "*", ...$values);
+                    return true;
+                }
+
+                foreach($children as $child){
+                    $childType = self::TYPE_OF_CLASS[$child::class] ?? null;
+                    if($childType === null || !$this->writeBody($child, $childType, $out)){
+                        return false;
+                    }
+                }
+                return true;
+            case self::TYPE_STRING:
+                $value = $tag->getValue();
+                $valueLength = strlen($value);
+                if($valueLength > self::MAX_STRING_LENGTH){
+                    self::throwStringTooLong($valueLength);
+                }
+                $out .= pack($this->short, $valueLength) . $value;
+                return true;
+            case self::TYPE_BYTE:
+                $out .= chr($tag->getValue() & 0xff);
+                return true;
+            case self::TYPE_SHORT:
+            case self::TYPE_INT:
+            case self::TYPE_LONG:
+            case self::TYPE_FLOAT:
+            case self::TYPE_DOUBLE:
+                $out .= pack($this->formats[$type], $tag->getValue());
+                return true;
+            case self::TYPE_BYTE_ARRAY:
+                $value = $tag->getValue();
+                $out .= pack($this->int, strlen($value)) . $value;
+                return true;
+            case self::TYPE_INT_ARRAY:
+                $value = $tag->getValue();
+                $out .= pack($this->int, count($value)) . pack($this->int . "*", ...$value);
                 return true;
         }
         return false;
     }
 
-    private static function checkWriteStringLength(int $length) : int{
-        if($length > self::MAX_STRING_LENGTH){
-            throw new \InvalidArgumentException("NBT string length too large ($length > " . self::MAX_STRING_LENGTH . ")");
-        }
-        return $length;
+    private static function throwStringTooLong(int $length) : never{
+        throw new \InvalidArgumentException("NBT string length too large ($length > " . self::MAX_STRING_LENGTH . ")");
     }
 
     /**
@@ -200,28 +252,32 @@ final class BinaryNbtCodec{
      */
     public function decode(string $buffer, int $maxDepth) : Tag{
         $length = strlen($buffer);
-        $offset = 0;
-
-        self::need($length, $offset, 1);
-        $type = ord($buffer[$offset++]);
+        if($length < 3){
+            if($length > 0 && $buffer[0] === "\x00"){
+                throw new NbtDataException("Found TAG_End at the start of buffer");
+            }
+            self::throwNotEnough(3, $length);
+        }
+        $type = ord($buffer[0]);
         if($type === 0){
             throw new NbtDataException("Found TAG_End at the start of buffer");
         }
 
+        $offset = 1;
         $this->readString($buffer, $length, $offset); // root name
         return $this->readTag($type, $buffer, $length, $offset, $maxDepth);
     }
 
     /** @throws NbtDataException */
-    private static function need(int $length, int $offset, int $required) : void{
-        if($length - $offset < $required){
-            throw new NbtDataException("Not enough bytes left in buffer: need $required, have " . ($length - $offset));
-        }
+    private static function throwNotEnough(int $required, int $have) : never{
+        throw new NbtDataException("Not enough bytes left in buffer: need $required, have $have");
     }
 
     /** @throws NbtDataException */
     private function readString(string $buffer, int $length, int &$offset) : string{
-        self::need($length, $offset, 2);
+        if($length - $offset < 2){
+            self::throwNotEnough(2, $length - $offset);
+        }
         $stringLength = unpack($this->short, $buffer, $offset)[1];
         $offset += 2;
         if($stringLength > self::MAX_STRING_LENGTH){
@@ -230,104 +286,161 @@ final class BinaryNbtCodec{
         if($stringLength === 0){
             return "";
         }
+        if($length - $offset < $stringLength){
+            self::throwNotEnough($stringLength, $length - $offset);
+        }
 
-        self::need($length, $offset, $stringLength);
         $offset += $stringLength;
         return substr($buffer, $offset - $stringLength, $stringLength);
     }
 
     /** @throws NbtDataException */
     private function readTag(int $type, string $buffer, int $length, int &$offset, int $depth) : Tag{
-        if(($type === self::TYPE_LIST || $type === self::TYPE_COMPOUND) && --$depth < 0){
-            throw new NbtDataException("Nesting depth limit exceeded");
-        }
         switch($type){
-            case self::TYPE_BYTE:
-                self::need($length, $offset, 1);
-                return new ByteTag(ord($buffer[$offset++]) << 56 >> 56);
-            case self::TYPE_SHORT:
-                self::need($length, $offset, 2);
-                $value = unpack($this->short, $buffer, $offset)[1] << 48 >> 48;
-                $offset += 2;
-                return new ShortTag($value);
-            case self::TYPE_INT:
-                return new IntTag($this->readInt($buffer, $length, $offset));
-            case self::TYPE_LONG:
-                self::need($length, $offset, 8);
-                $offset += 8;
-                return new LongTag(unpack($this->long, $buffer, $offset - 8)[1]);
-            case self::TYPE_FLOAT:
-                self::need($length, $offset, 4);
-                $offset += 4;
-                return new FloatTag(unpack($this->float, $buffer, $offset - 4)[1]);
-            case self::TYPE_DOUBLE:
-                self::need($length, $offset, 8);
-                $offset += 8;
-                return new DoubleTag(unpack($this->double, $buffer, $offset - 8)[1]);
-            case self::TYPE_BYTE_ARRAY:
-                $size = $this->readInt($buffer, $length, $offset);
-                if($size < 0){
-                    throw new NbtDataException("Array length cannot be less than zero ($size < 0)");
-                }
-                if($size === 0){
-                    return new ByteArrayTag("");
-                }
-
-                self::need($length, $offset, $size);
-                $offset += $size;
-                return new ByteArrayTag(substr($buffer, $offset - $size, $size));
-            case self::TYPE_STRING:
-                return new StringTag($this->readString($buffer, $length, $offset));
-            case self::TYPE_LIST:
-                self::need($length, $offset, 1);
-                $childType = ord($buffer[$offset++]);
-                $size = $this->readInt($buffer, $length, $offset);
-
-                $children = [];
-                if($size > 0){
-                    if($childType === 0){
-                        throw new NbtDataException("Unexpected non-empty list of TAG_End");
-                    }
-                    for($i = 0; $i < $size; ++$i){
-                        $children[] = $this->readTag($childType, $buffer, $length, $offset, $depth);
-                    }
-                }
-                return new ListTag($children, $childType);
             case self::TYPE_COMPOUND:
-                $result = CompoundTag::create();
-                $names = [];
+                if(--$depth < 0){
+                    throw new NbtDataException("Nesting depth limit exceeded");
+                }
+
+                $entries = [];
                 while(true){
-                    self::need($length, $offset, 1);
+                    if($offset >= $length){
+                        self::throwNotEnough(1, 0);
+                    }
                     $childType = ord($buffer[$offset++]);
                     if($childType === 0){
-                        return $result;
+                        return TagFactory::compound($entries);
                     }
 
                     $name = $this->readString($buffer, $length, $offset);
                     $child = $this->readTag($childType, $buffer, $length, $offset, $depth);
-                    if(isset($names[$name])){
-                        //duplicated names keep the first value, as pocketmine/nbt does
-                        continue;
+                    //duplicated names keep the first value, as pocketmine/nbt does
+                    $entries[$name] ??= $child;
+                }
+            case self::TYPE_LIST:
+                if(--$depth < 0){
+                    throw new NbtDataException("Nesting depth limit exceeded");
+                }
+                if($length - $offset < 5){
+                    self::throwNotEnough(5, $length - $offset);
+                }
+                $childType = ord($buffer[$offset]);
+                $size = unpack($this->int, $buffer, $offset + 1)[1] << 32 >> 32;
+                $offset += 5;
+                if($size <= 0){
+                    return new ListTag([], $childType);
+                }
+                if($childType === 0){
+                    throw new NbtDataException("Unexpected non-empty list of TAG_End");
+                }
+
+                $children = [];
+                $width = self::SIZE_OF_TYPE[$childType] ?? null;
+                if($width !== null){ // list of fixed size values : unpack them at once
+                    $byteLength = $size * $width;
+                    if($length - $offset < $byteLength){
+                        self::throwNotEnough($byteLength, $length - $offset);
                     }
-                    $names[$name] = true;
-                    $result->setTag($name, $child);
+                    $values = unpack($this->formats[$childType] . $size, $buffer, $offset);
+                    $offset += $byteLength;
+                    switch($childType){
+                        case self::TYPE_BYTE:
+                            foreach($values as $value){
+                                $children[] = new ByteTag($value);
+                            }
+                            break;
+                        case self::TYPE_SHORT:
+                            foreach($values as $value){
+                                $children[] = new ShortTag($value << 48 >> 48);
+                            }
+                            break;
+                        case self::TYPE_INT:
+                            foreach($values as $value){
+                                $children[] = new IntTag($value << 32 >> 32);
+                            }
+                            break;
+                        case self::TYPE_LONG:
+                            foreach($values as $value){
+                                $children[] = new LongTag($value);
+                            }
+                            break;
+                        case self::TYPE_FLOAT:
+                            foreach($values as $value){
+                                $children[] = new FloatTag($value);
+                            }
+                            break;
+                        default:
+                            foreach($values as $value){
+                                $children[] = new DoubleTag($value);
+                            }
+                    }
+                }else{
+                    for($i = 0; $i < $size; ++$i){
+                        $children[] = $this->readTag($childType, $buffer, $length, $offset, $depth);
+                    }
                 }
+                return TagFactory::list($children, $childType);
+            case self::TYPE_STRING:
+                return new StringTag($this->readString($buffer, $length, $offset));
+            case self::TYPE_BYTE:
+                if($offset >= $length){
+                    self::throwNotEnough(1, 0);
+                }
+                return new ByteTag(ord($buffer[$offset++]) << 56 >> 56);
+            case self::TYPE_SHORT:
+                if($length - $offset < 2){
+                    self::throwNotEnough(2, $length - $offset);
+                }
+                $offset += 2;
+                return new ShortTag(unpack($this->short, $buffer, $offset - 2)[1] << 48 >> 48);
+            case self::TYPE_INT:
+                if($length - $offset < 4){
+                    self::throwNotEnough(4, $length - $offset);
+                }
+                $offset += 4;
+                return new IntTag(unpack($this->int, $buffer, $offset - 4)[1] << 32 >> 32);
+            case self::TYPE_LONG:
+                if($length - $offset < 8){
+                    self::throwNotEnough(8, $length - $offset);
+                }
+                $offset += 8;
+                return new LongTag(unpack($this->long, $buffer, $offset - 8)[1]);
+            case self::TYPE_FLOAT:
+                if($length - $offset < 4){
+                    self::throwNotEnough(4, $length - $offset);
+                }
+                $offset += 4;
+                return new FloatTag(unpack($this->float, $buffer, $offset - 4)[1]);
+            case self::TYPE_DOUBLE:
+                if($length - $offset < 8){
+                    self::throwNotEnough(8, $length - $offset);
+                }
+                $offset += 8;
+                return new DoubleTag(unpack($this->double, $buffer, $offset - 8)[1]);
+            case self::TYPE_BYTE_ARRAY:
+                $size = $this->readArraySize($buffer, $length, $offset);
+                if($size === 0){
+                    return new ByteArrayTag("");
+                }
+                if($length - $offset < $size){
+                    self::throwNotEnough($size, $length - $offset);
+                }
+                $offset += $size;
+                return new ByteArrayTag(substr($buffer, $offset - $size, $size));
             case self::TYPE_INT_ARRAY:
-                $size = $this->readInt($buffer, $length, $offset);
-                if($size < 0){
-                    throw new NbtDataException("Array length cannot be less than zero ($size < 0)");
-                }
+                $size = $this->readArraySize($buffer, $length, $offset);
                 if($size === 0){
                     return new IntArrayTag([]);
                 }
-
                 $byteLength = $size * 4;
-                self::need($length, $offset, $byteLength);
-                $offset += $byteLength;
+                if($length - $offset < $byteLength){
+                    self::throwNotEnough($byteLength, $length - $offset);
+                }
                 $values = [];
-                foreach(unpack($this->int . "*", substr($buffer, $offset - $byteLength, $byteLength)) as $value){
+                foreach(unpack($this->int . $size, $buffer, $offset) as $value){
                     $values[] = $value << 32 >> 32; // sign extension
                 }
+                $offset += $byteLength;
                 return new IntArrayTag($values);
             default:
                 throw new NbtDataException("Unknown NBT tag type $type");
@@ -335,9 +448,15 @@ final class BinaryNbtCodec{
     }
 
     /** @throws NbtDataException */
-    private function readInt(string $buffer, int $length, int &$offset) : int{
-        self::need($length, $offset, 4);
+    private function readArraySize(string $buffer, int $length, int &$offset) : int{
+        if($length - $offset < 4){
+            self::throwNotEnough(4, $length - $offset);
+        }
+        $size = unpack($this->int, $buffer, $offset)[1] << 32 >> 32;
         $offset += 4;
-        return unpack($this->int, $buffer, $offset - 4)[1] << 32 >> 32;
+        if($size < 0){
+            throw new NbtDataException("Array length cannot be less than zero ($size < 0)");
+        }
+        return $size;
     }
 }

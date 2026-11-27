@@ -29,6 +29,7 @@ namespace kim\present\serializer\nbt;
 use kim\present\serializer\nbt\exception\SnbtDataException;
 use pocketmine\nbt\BigEndianNbtSerializer;
 use pocketmine\nbt\LittleEndianNbtSerializer;
+use pocketmine\nbt\NBT;
 use pocketmine\nbt\NbtDataException;
 use pocketmine\nbt\tag\ByteArrayTag;
 use pocketmine\nbt\tag\ByteTag;
@@ -44,7 +45,6 @@ use pocketmine\nbt\tag\StringTag;
 use pocketmine\nbt\tag\Tag;
 use pocketmine\nbt\TreeRoot;
 
-use function array_map;
 use function base64_decode;
 use function base64_encode;
 use function bin2hex;
@@ -300,13 +300,93 @@ final class NbtSerializer{
 
     /** @param bool $canonical write the same string for all tags that are equal by {@see Tag::equals()} */
     private static function writeSnbt(Tag $tag, bool $sortKeys, bool $canonical) : string{
-        switch(get_class($tag)){
+        switch($tag::class){
+            case CompoundTag::class:
+                $value = $tag->getValue();
+                if($value === []){
+                    return "{}";
+                }
+                if($sortKeys){
+                    ksort($value, SORT_STRING);
+                }
+
+                $result = "";
+                foreach($value as $key => $child){
+                    $key = (string) $key;
+                    $result .= ($result === "" ? "{" : ",")
+                        . ($key !== "" && strspn($key, self::SAFE_KEY_CHARS) === strlen($key) ? $key : self::quoteString($key))
+                        . ":";
+                    // inlined scalar types, the most common entries
+                    switch($child::class){
+                        case StringTag::class:
+                            $result .= json_encode($child->getValue(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                                ?: self::quoteString($child->getValue());
+                            break;
+                        case IntTag::class:
+                            $result .= $child->getValue();
+                            break;
+                        case ByteTag::class:
+                            $result .= $child->getValue() . "b";
+                            break;
+                        case ShortTag::class:
+                            $result .= $child->getValue() . "s";
+                            break;
+                        case LongTag::class:
+                            $result .= $child->getValue() . "l";
+                            break;
+                        default:
+                            $result .= self::writeSnbt($child, $sortKeys, $canonical);
+                    }
+                }
+                return "$result}";
+            case ListTag::class:
+                $children = $tag->getValue();
+                if($children === []){
+                    return "[]";
+                }
+
+                // lists are typed : format every entry with the same fast path
+                $parts = [];
+                switch($tag->getTagType()){
+                    case NBT::TAG_Int:
+                        foreach($children as $child){
+                            $parts[] = $child->getValue();
+                        }
+                        return "[" . implode(",", $parts) . "]";
+                    case NBT::TAG_Byte:
+                        foreach($children as $child){
+                            $parts[] = $child->getValue();
+                        }
+                        return "[" . implode("b,", $parts) . "b]";
+                    case NBT::TAG_Short:
+                        foreach($children as $child){
+                            $parts[] = $child->getValue();
+                        }
+                        return "[" . implode("s,", $parts) . "s]";
+                    case NBT::TAG_Long:
+                        foreach($children as $child){
+                            $parts[] = $child->getValue();
+                        }
+                        return "[" . implode("l,", $parts) . "l]";
+                    case NBT::TAG_String:
+                        foreach($children as $child){
+                            $parts[] = json_encode($child->getValue(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                                ?: self::quoteString($child->getValue());
+                        }
+                        return "[" . implode(",", $parts) . "]";
+                }
+                foreach($children as $child){
+                    $parts[] = self::writeSnbt($child, $sortKeys, $canonical);
+                }
+                return "[" . implode(",", $parts) . "]";
+            case StringTag::class:
+                return self::quoteString($tag->getValue());
+            case IntTag::class:
+                return (string) $tag->getValue();
             case ByteTag::class:
                 return $tag->getValue() . "b";
             case ShortTag::class:
                 return $tag->getValue() . "s";
-            case IntTag::class:
-                return (string) $tag->getValue();
             case LongTag::class:
                 return $tag->getValue() . "l";
             case FloatTag::class:
@@ -315,24 +395,6 @@ final class NbtSerializer{
             case DoubleTag::class:
                 // DoubleTag::equals() uses ===, which treats -0.0 and 0.0 as equal
                 return self::encodeFloat($canonical ? $tag->getValue() + 0.0 : $tag->getValue()) . "d";
-            case StringTag::class:
-                return self::quoteString($tag->getValue());
-            case CompoundTag::class:
-                $value = $tag->getValue();
-                if($sortKeys){
-                    ksort($value, SORT_STRING);
-                }
-                $parts = [];
-                foreach($value as $key => $child){
-                    $parts[] = self::encodeKey((string) $key) . ":" . self::writeSnbt($child, $sortKeys, $canonical);
-                }
-                return "{" . implode(",", $parts) . "}";
-            case ListTag::class:
-                $parts = [];
-                foreach($tag->getValue() as $child){
-                    $parts[] = self::writeSnbt($child, $sortKeys, $canonical);
-                }
-                return "[" . implode(",", $parts) . "]";
             case ByteArrayTag::class:
                 $value = $tag->getValue();
                 return $value === ''
@@ -340,11 +402,16 @@ final class NbtSerializer{
                     : "[B;" . implode("b,", unpack("c*", $value)) . "b]";
             case IntArrayTag::class:
                 $value = $tag->getValue();
-                return $value === []
-                    ? "[I;]"
-                    : "[I;" . implode(",", array_map(self::signInt(...), $value)) . "]";
+                if($value === []){
+                    return "[I;]";
+                }
+                $parts = [];
+                foreach($value as $int){
+                    $parts[] = $int << 32 >> 32; // normalize the unsigned 32-bit values (as decoded by pocketmine/nbt)
+                }
+                return "[I;" . implode(",", $parts) . "]";
             default:
-                throw new \InvalidArgumentException("Unknown tag type " . get_class($tag));
+                throw new \InvalidArgumentException("Unknown tag type " . $tag::class);
         }
     }
 
@@ -395,10 +462,6 @@ final class NbtSerializer{
         return "$result$lineBreak$tap]";
     }
 
-    /** Normalize the unsigned 32-bit values (as decoded by pocketmine/nbt) to signed */
-    private static function signInt(int $value) : int{
-        return $value << 32 >> 32;
-    }
 
         /** Quote the compound key only when it is empty or contains characters outside of [a-zA-Z0-9._+-] */
     private static function encodeKey(string $key) : string{

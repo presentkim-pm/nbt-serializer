@@ -7,7 +7,9 @@ namespace kim\present\serializer\nbt\tests;
 use kim\present\serializer\nbt\NbtSerializer;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use kim\present\serializer\nbt\Endian;
 use pocketmine\nbt\BigEndianNbtSerializer;
+use pocketmine\nbt\LittleEndianNbtSerializer;
 use pocketmine\nbt\NbtDataException;
 use pocketmine\nbt\tag\ByteArrayTag;
 use pocketmine\nbt\tag\ByteTag;
@@ -70,12 +72,16 @@ final class NbtSerializerTest extends TestCase{
     public function testRandomTreesRoundTrip() : void{
         mt_srand(20261126);
         $reference = new BigEndianNbtSerializer();
+        $littleReference = new LittleEndianNbtSerializer();
         for($i = 0; $i < 2000; ++$i){
             $tag = self::randomTag(0);
 
             $binary = NbtSerializer::toBinary($tag);
             self::assertSame($reference->write(new TreeRoot($tag)), $binary, "binary output must match pocketmine/nbt");
             self::assertTrue(NbtSerializer::fromBinary($binary)->equals($tag), "binary round trip");
+            $little = NbtSerializer::toBinary($tag, Endian::LITTLE);
+            self::assertSame($littleReference->write(new TreeRoot($tag)), $little, "little endian output must match pocketmine/nbt");
+            self::assertTrue(NbtSerializer::fromBinary($little, Endian::LITTLE)->equals($tag), "little endian round trip");
             self::assertTrue(NbtSerializer::fromBase64(NbtSerializer::toBase64($tag))->equals($tag), "base64 round trip");
             self::assertTrue(NbtSerializer::fromHex(NbtSerializer::toHex($tag))->equals($tag), "hex round trip");
 

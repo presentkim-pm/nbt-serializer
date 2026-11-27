@@ -9,9 +9,16 @@ use kim\present\serializer\nbt\Endian;
 use kim\present\serializer\nbt\NbtSerializer;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use pocketmine\nbt\BigEndianNbtSerializer;
 use pocketmine\nbt\LittleEndianNbtSerializer;
 use pocketmine\nbt\NbtDataException;
 use pocketmine\nbt\tag\ByteArrayTag;
+use pocketmine\nbt\tag\ByteTag;
+use pocketmine\nbt\tag\DoubleTag;
+use pocketmine\nbt\tag\FloatTag;
+use pocketmine\nbt\tag\IntTag;
+use pocketmine\nbt\tag\LongTag;
+use pocketmine\nbt\tag\ShortTag;
 use pocketmine\nbt\tag\CompoundTag;
 use pocketmine\nbt\tag\IntArrayTag;
 use pocketmine\nbt\tag\ListTag;
@@ -97,6 +104,28 @@ final class BinaryFormatTest extends TestCase{
             }
         }
         self::assertNotNull(NbtSerializer::tryFromCompressed($compressed));
+    }
+
+    public function testScalarListsMatchPocketmine() : void{
+        $tag = CompoundTag::create()
+            ->setTag("b", new ListTag([new ByteTag(-128), new ByteTag(127), new ByteTag(-1)]))
+            ->setTag("s", new ListTag([new ShortTag(-32768), new ShortTag(32767), new ShortTag(-2)]))
+            ->setTag("i", new ListTag([new IntTag(-0x80000000), new IntTag(0x7fffffff), new IntTag(-5)]))
+            ->setTag("l", new ListTag([new LongTag(PHP_INT_MIN), new LongTag(PHP_INT_MAX), new LongTag(-7)]))
+            ->setTag("f", new ListTag([new FloatTag(-1.5), new FloatTag(3.25)]))
+            ->setTag("d", new ListTag([new DoubleTag(-0.1), new DoubleTag(1e300)]));
+        foreach([[Endian::BIG, new BigEndianNbtSerializer()], [Endian::LITTLE, new LittleEndianNbtSerializer()]] as [$endian, $reference]){
+            $binary = NbtSerializer::toBinary($tag, $endian);
+            self::assertSame($reference->write(new TreeRoot($tag)), $binary, $endian->name);
+            self::assertTrue(NbtSerializer::fromBinary($binary, $endian)->equals($tag), $endian->name);
+            self::assertTrue($reference->read($binary)->getTag()->equals($tag), $endian->name);
+        }
+    }
+
+    public function testTruncatedScalarListThrows() : void{
+        $binary = NbtSerializer::toBinary(new ListTag([new IntTag(1), new IntTag(2)]));
+        $this->expectException(NbtDataException::class);
+        NbtSerializer::fromBinary(substr($binary, 0, -1));
     }
 
     public function testBinaryDepthLimit() : void{
