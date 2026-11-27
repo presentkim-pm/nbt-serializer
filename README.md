@@ -276,7 +276,7 @@ The `tryFrom*()` methods return `null` for invalid input instead.
 | `toSnbt`                          | 5.9     | 216                  | 835           |
 | `fromSnbt`                        | 15.5    | 549                  | 1887          |
 
-The binary formats are 1.3~1.5 times faster than SNBT for items, and 6~9 times faster for numeric data.
+The binary formats are 1.3–1.5 times faster than SNBT for items, and 6–9 times faster for numeric data.
 See [PERFORMANCE.md][performance-url] for the details.
 
 ---

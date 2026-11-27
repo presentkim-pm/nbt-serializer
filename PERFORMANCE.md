@@ -500,13 +500,13 @@ The output of every operation was verified to be identical to the previous imple
 | numbers   | 314 → 92 (-71%)  | 838 → 305 (-64%) | 985 → 835 (-15%) | 2330 → 1887 (-19%) |
 | strings   | 86 → 67 (-21%)   | 185 → 145 (-21%) | 140 → 132 (-5%)  | 300 → 303 (±0%)   |
 
-With the tracing JIT enabled, every operation is 30~45% faster again, with similar relative improvements.
+With the tracing JIT enabled, every operation is 30–45% faster again, with similar relative improvements.
 
 ### What was changed
 - **Binary** : lists of fixed size values (byte, short, int, long, float, double) are written and read with a single `pack()` / `unpack()`,
   bounds checks and the scalar entries of compound tags are inlined.
 - **Building tags** : decoded list and compound tags are built at once with their validated entries,
-  instead of `ListTag::push()` / `CompoundTag::setTag()` per entry (10~37% of the decoding time).
+  instead of `ListTag::push()` / `CompoundTag::setTag()` per entry (10–37% of the decoding time).
   It relies on the internal layout of pocketmine/nbt, and falls back to the public API if the layout changes.
 - **SNBT parser** : unquoted values in lists and compounds are parsed without the recursive `readTag()`,
   byte / int arrays are matched with one `preg_match_all()`.

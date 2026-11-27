@@ -42,10 +42,10 @@ The original [pmmp/PocketMine-MP](https://github.com/pmmp/PocketMine-MP) 5.x (Po
   (or were silently written as `""`).
 - Spaces between a quoted key and `:`, upper case byte array suffixes (`[B;1B]`) and exponents (`1e5`, now a double) are accepted.
 - Invalid hex input no longer emits a warning, binary and SNBT nesting is limited to avoid stack overflows.
-- Unsigned byte (0 ~ 255) and int (0 ~ 0xffffffff) array values written by the previous versions are still accepted.
+- Unsigned byte (0 – 255) and int (0 – 0xffffffff) array values written by the previous versions are still accepted.
 
 ### ⚡ Performance
-Binary (de)serialization is 13~71% faster and SNBT up to 19% faster, see [PERFORMANCE.md](PERFORMANCE.md).
+Binary (de)serialization is 13–71% faster and SNBT up to 19% faster, see [PERFORMANCE.md](PERFORMANCE.md).
 
 ### 🧪 Development
 - PHPUnit tests (129 tests, including randomized comparisons with pocketmine/nbt) and GitHub Actions CI on PHP 8.4 / 8.5.
